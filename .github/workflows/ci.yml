@@ -49,6 +49,12 @@ jobs:
             8.0.426
             10.0.204
 
+      - name: Verify SDK selection
+        run: |
+          $version = dotnet --version
+          if ($version -ne "10.0.204") { throw "Unexpected .NET SDK: $version" }
+          dotnet --info
+
       - name: Restore
         run: dotnet restore FSharp.ModelsDev.slnx
 

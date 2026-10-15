@@ -103,7 +103,7 @@ FSharp.ModelsDev/
 
 ## 验证
 
-使用 .NET 10 SDK 处理 `.slnx`，安装 .NET 8 运行时执行 `net8.0` 测试。CI 固定安装 .NET 8.0.426/10.0.204 SDK，在 Linux、Windows 构建和运行默认离线测试；真实接口和录制开关强制关闭。SDK 升级必须先通过两平台测试，避免编译器更新导致任务状态机的运行时回归。
+使用 .NET 10 SDK 处理 `.slnx`，安装 .NET 8 运行时执行 `net8.0` 测试。`global.json` 禁止 SDK 自动前滚，CI 固定安装 .NET 8.0.426/10.0.204 SDK，在 Linux、Windows 构建和运行默认离线测试；真实接口和录制开关强制关闭。SDK 升级必须先通过两平台测试，避免编译器更新导致任务状态机的运行时回归。
 
 ```powershell
 dotnet build FSharp.ModelsDev.slnx -c Release
