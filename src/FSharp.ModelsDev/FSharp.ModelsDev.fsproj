@@ -3,7 +3,18 @@
   <PropertyGroup>
     <RootNamespace>FSharp.ModelsDev</RootNamespace>
     <PackageId>FSharp.ModelsDev</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>kwadraten</Authors>
     <Description>F# LLM API SDK: standalone chat client, Models.dev offline catalog, Microsoft.Extensions.AI IChatClient adapter.</Description>
+    <PackageProjectUrl>https://github.com/kwadraten/FSharp.ModelsDev</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kwadraten/FSharp.ModelsDev</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>FSharp;AI;LLM;models.dev;Microsoft.Extensions.AI</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,6 +58,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../README.zh-CN.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
     <EmbeddedResource Include="../../catalog/models.snapshot.json">
       <LogicalName>FSharp.ModelsDev.models.snapshot.json</LogicalName>
     </EmbeddedResource>

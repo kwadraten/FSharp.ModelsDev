@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ModelsDevVersion Condition="'$(ModelsDevVersion)' == ''">0.0.0</ModelsDevVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.ModelsDev" Version="$(ModelsDevVersion)" />
+  </ItemGroup>
+</Project>

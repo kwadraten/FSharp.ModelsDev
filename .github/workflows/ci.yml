@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Package version supplied by the tag publishing workflow
+        type: string
+        default: 0.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_VERSION: ${{ inputs.version || '0.0.0' }}
+  MODELSDEV_LIVE_TESTS: '0'
+  MODELSDEV_RECORD: '0'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up .NET SDK and test runtime
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore FSharp.ModelsDev.slnx
+
+      - name: Build
+        run: dotnet build FSharp.ModelsDev.slnx -c Release --no-restore -p:Version=$env:PACKAGE_VERSION -p:ContinuousIntegrationBuild=true
+
+      - name: Run offline and recorded tests
+        run: dotnet test FSharp.ModelsDev.slnx -c Release --no-build --no-restore --logger 'trx;LogFileName=tests.trx' --results-directory artifacts/tests
+
+      - name: Verify embedded catalog and generated indexes
+        run: dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -c Release --no-build --no-restore -- verify
+
+      - name: Pack NuGet and symbols
+        if: runner.os == 'Linux'
+        run: dotnet pack src/FSharp.ModelsDev/FSharp.ModelsDev.fsproj -c Release --no-build --no-restore -p:Version=$env:PACKAGE_VERSION -p:ContinuousIntegrationBuild=true -o artifacts/packages
+
+      - name: Verify package and install into F# and C# consumers
+        if: runner.os == 'Linux'
+        run: ./.github/scripts/Test-Package.ps1 -Version $env:PACKAGE_VERSION
+
+      - name: Upload verified packages
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tests-${{ matrix.os }}
+          path: artifacts/tests/*.trx
+          if-no-files-found: ignore

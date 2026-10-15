@@ -2,6 +2,8 @@
 
 本文件适用于整个仓库，供修改代码、测试和维护目录时使用。SDK 的配置与使用示例见 [README.md](README.md)。
 
+README.md 为默认英文说明，README.zh-CN.md 为对应中文版；公共 API、示例和能力范围应保持一致。README 面向包使用者，仓库约束、CI、发布及维护步骤留在本文件。
+
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 
@@ -101,6 +103,8 @@ FSharp.ModelsDev/
 
 ## 验证
 
+使用 .NET 10 SDK 处理 `.slnx`，安装 .NET 8 运行时执行 `net8.0` 测试。CI 同时安装 .NET 8/10 SDK，在 Linux、Windows 构建和运行默认离线测试；真实接口和录制开关强制关闭。
+
 ```powershell
 dotnet build FSharp.ModelsDev.slnx -c Release
 dotnet test FSharp.ModelsDev.slnx -c Release --no-build
@@ -178,3 +182,32 @@ dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- verify
 ```
 
 更新快照或生成逻辑后，确保快照、校验和与生成索引保持一致，并运行 `verify`；生成文件的变更应来自生成器。
+
+## CI 与 NuGet 发布
+
+`.github/workflows/ci.yml` 响应 main 推送、PR、手动运行，并由发布工作流复用。除构建、离线测试和目录校验外，Linux job 打包并通过 `.github/scripts/Test-Package.ps1` 验证 DLL、XML 文档、双语 README、MIT 许可证、版本及符号包，再将产物安装进独立 F#、C# 消费项目。`tests/PackageSmoke.*` 不加入解决方案，不引用 SDK 工程；必须用生成的 NuGet 包验证，以免项目引用掩盖打包遗漏。使用独立依赖缓存和 source mapping，确保本库只能从本次产物源安装。
+
+发布只由 `.github/workflows/publish.yml` 的版本 tag 推送触发。格式为纯三段数字 `MAJOR.MINOR.PATCH`，例如 `0.1.0`；禁止 `v` 前缀、预发布后缀（如 `rc`）、前导零及 `+build` 元数据。`.github/scripts/Resolve-Version.ps1` 验证并原样返回版本号，该值同时用于构建、打包和发布。不依赖手动修改项目中的默认开发版本。
+
+NuGet 信任发布策略绑定 `kwadraten/FSharp.ModelsDev`、文件名 `publish.yml` 和 GitHub Environment `nuget.org`。发布 job 必须保持这些匹配项，只有该 job 申请 `id-token: write`；`NuGet/login` 的用户名固定为 `kwadraten`，无需长期 API key 或仓库 secret。发布 job 下载同次运行中已通过检查的产物，不重新打包；校验或任何平台测试失败都不能发布。重跑通过 `--skip-duplicate` 避免重复版本报错，NuGet 已发布版本不可覆盖。Actions 固定到完整提交 SHA，升级时核对对应官方 release。
+
+本地检查打包产物：
+
+```powershell
+$version = ./.github/scripts/Resolve-Version.ps1 -Tag 0.1.0
+dotnet build FSharp.ModelsDev.slnx -c Release -p:Version=$version -p:ContinuousIntegrationBuild=true
+dotnet pack src/FSharp.ModelsDev/FSharp.ModelsDev.fsproj -c Release --no-build --no-restore -p:Version=$version -p:ContinuousIntegrationBuild=true -o artifacts/packages
+./.github/scripts/Test-Package.ps1 -Version $version
+```
+
+构建/打包依赖还原可访问 NuGet；消费项目实际执行的目录查询与客户端创建仍须离线。GitHub OIDC 交换和远端推送只能在实际工作流中验证，不能将本地打包成功描述为发布成功。
+
+确认待发布提交已包含工作流和全部实现后，创建并推送 tag 即触发自动发布：
+
+```powershell
+git tag -a 0.1.0 -m "Release 0.1.0"
+git push origin main
+git push origin 0.1.0
+```
+
+只有用户明确要求发布时才实际创建/推送版本 tag。NuGet 机制参考[官方 Trusted Publishing 文档](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)。

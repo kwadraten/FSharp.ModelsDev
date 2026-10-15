@@ -1,0 +1,80 @@
+name: Publish NuGet
+
+on:
+  push:
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve NuGet version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./.github/scripts/Resolve-Version.ps1 -Tag $env:RELEASE_TAG
+
+  checks:
+    name: Verify tagged package
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    name: Publish to nuget.org
+    needs: [version, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: nuget.org
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download verified package artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget
+          path: artifacts/packages
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Sign in with NuGet trusted publishing
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: kwadraten
+
+      - name: Push package and symbols
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = "artifacts/packages/FSharp.ModelsDev.$env:PACKAGE_VERSION.nupkg"
+          $symbols = "artifacts/packages/FSharp.ModelsDev.$env:PACKAGE_VERSION.snupkg"
+          if (!(Test-Path -LiteralPath $package) -or !(Test-Path -LiteralPath $symbols)) {
+            throw 'The verified package or symbols artifact is missing.'
+          }
+          # dotnet pushes the adjacent .snupkg together with the primary package.
+          dotnet nuget push $package --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet push failed.' }
