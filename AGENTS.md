@@ -21,8 +21,9 @@ FSharp.ModelsDev/
 │   ├── Contracts.fs                 #   ChatMessage / ChatRequest / ChatResponse / ChatStreamEvent
 │   ├── Errors.fs                    #   AiError / AiException
 │   ├── Seams.fs                     #   IChatTransport / IChatProtocol / IChatModel / ICredentialProvider
-│   ├── CatalogTypes.fs              #   ModelInfo / ProviderDefinition / ModelCapabilities / ReasoningControl
+│   ├── CatalogTypes.fs              #   ModelInfo / ModelMetadata / ModelFilter / ProviderDefinition / ModelCapabilities
 │   ├── IModelCatalog.fs             #   IModelCatalog（纯离线目录 seam）
+│   ├── ModelCatalogQuery.fs         #   目录与模型集合的离线组合筛选
 │   ├── Generated/*.g.fs             #   生成代码：ProviderIndex / ModelIndex
 │   ├── SnapshotCatalog.fs           #   内嵌快照的 IModelCatalog 实现
 │   ├── BackendCore.fs              #   多事件 SSE 帧解析
@@ -52,7 +53,7 @@ FSharp.ModelsDev/
 
 | Seam | 职责 | 不知道 |
 | --- | --- | --- |
-| `IModelCatalog` | 快照的纯离线查询（`SnapshotVersion` / `ProviderIds` / `TryGet` / `GetModels`） | 账户、凭据、HTTP |
+| `IModelCatalog` | 快照的纯离线查询（`SnapshotVersion` / `ProviderIds` / `TryGet` / `GetModels`）；`ModelCatalogQuery` 对目录或已有模型集合进行元数据筛选 | 账户、凭据、HTTP |
 | `CapabilityPolicy` | 按 `ModelCapabilities` 校验/裁剪请求参数 | 凭据、传输细节 |
 | `IChatClientFactory`（`ProviderFactory`） | 按 `providerId + accountId + modelId` 组装 `IChatModel` | 线格式（归 Protocol）、快照内容（归 Catalog） |
 | `ICredentialProvider` | `accountId` → 请求 headers | 模型能力、目录 |
@@ -130,6 +131,12 @@ dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- verify
 ## 目录维护
 
 models.dev 快照（`catalog/models.snapshot.json` + `.sha256`）作为 EmbeddedResource 编译进程序集，普通构建与运行不联网。
+
+`ModelInfo` 的目录元数据包括 `MaxInputTokens`、输入/输出模态、描述、family、model type、status、knowledge cutoff、发布日期、最后更新时间、附件/温度支持标记及开放权重标记；新增可选元数据应以 nullable 值或空列表表达未知。时间及日期字段保留快照原始字符串（包括部分日期）。`ModelInfo` 的元数据构造重载必须快照复制可变 `ModelMetadata` DTO 及其模态列表，保留旧构造重载，并使旧重载的新属性保持未知。
+
+`ModelCatalogQuery.FindModels` 查询 `IModelCatalog`，`FilterModels` 筛选调用者已有的模型集合；两者都必须离线，不触发快照更新或账户发现。所有非空条件取 AND；provider/family/model type/status 每组标识值取 OR；所需输入/输出模态均须存在；所需能力须全部满足。字符串比较使用 ordinal 语义。指定数值或布尔筛选时，未知值不匹配；空/缺省筛选不限制结果。数值下限允许 0、拒绝负值，输入 token、上下文与最大输出各自按原值筛选，不可互相推算。结果稳定按 provider ID 和 model ID 排序。
+
+快照中的模态或支持标记仅是目录元数据，不代表 SDK 后端/传输实际支持对应功能，也不代表账户权限。账户在线发现仍由宿主显式调用并与离线快照分离，不将发现结果自动合并进快照或其元数据。目录生成与刷新机制保持既有 raw snapshot、校验和及生成索引流程；不得在本功能中加入在线刷新，也不新增价格支持。
 
 ```bash
 # 联网更新快照，并重新生成 src/FSharp.ModelsDev/Generated/*.g.fs

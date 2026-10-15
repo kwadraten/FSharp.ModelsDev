@@ -15,6 +15,7 @@
     <Compile Include="ProviderAuthTypes.fs" />
     <Compile Include="ProviderOptions.fs" />
     <Compile Include="IModelCatalog.fs" />
+    <Compile Include="ModelCatalogQuery.fs" />
     <Compile Include="Generated/ProviderIndex.g.fs" />
     <Compile Include="Generated/ModelIndex.g.fs" />
     <Compile Include="SnapshotCatalog.fs" />

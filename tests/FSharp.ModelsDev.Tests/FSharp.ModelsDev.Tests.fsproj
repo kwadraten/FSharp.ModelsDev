@@ -9,6 +9,8 @@
   <ItemGroup>
     <Compile Include="CoreTests.fs" />
     <Compile Include="CatalogTests.fs" />
+    <Compile Include="CatalogMetadataTests.fs" />
+    <Compile Include="ModelCatalogQueryTests.fs" />
     <Compile Include="OpenAIProtocolTests.fs" />
     <Compile Include="CapabilityPolicyTests.fs" />
     <Compile Include="ExtensionsAIAdapterTests.fs" />

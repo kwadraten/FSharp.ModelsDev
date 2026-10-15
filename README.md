@@ -65,6 +65,43 @@ match catalog.TryGet("openai", "gpt-5") with
 let models = catalog.GetModels("openai")
 ```
 
+`ModelInfo` 还提供 models.dev 快照中的可选元数据：`MaxInputTokens`、`InputModalities`、`OutputModalities`、`Description`、`Family`、`ModelType`、`Status`、`KnowledgeCutoff`、`ReleaseDate`、`LastUpdated`、`SupportsAttachments`、`SupportsTemperature` 和 `OpenWeights`。数字与布尔值使用可空类型；`null` / 空集合表示快照没有提供该值。日期和知识截止时间保留为原始字符串，因此可能是部分日期。`ModelInfo` 通过 `ModelMetadata` 构造时会复制元数据及 modality 列表；原有不带 `ModelMetadata` 的构造方式仍可用，未提供的新字段保持未知。
+
+可用 `ModelCatalogQuery.FindModels(catalog, filter)` 在离线目录中查找，或对已有模型集合调用 `ModelCatalogQuery.FilterModels(models, filter)`。筛选器中所有已设置的条件都必须满足；同一标识字段的列表（provider、family、model type、status）内任一值匹配即可，模态条件要求模型包含所列的全部模态，能力条件要求包含 `RequiredCapabilities` 中的全部标志。字符串按序号比较。未提供的数值或布尔元数据无法满足对应条件；空列表、`null` 列表及未设置的 nullable 条件不增加限制。数值下限允许设置为零，负数无效；上下文、输入和输出 token 分别筛选，不会从上下文长度减去输出长度来推断输入上限。结果按 provider ID、再按 model ID 稳定排序。
+
+以下例子筛选支持图像输入、工具调用、上下文至少 131072 tokens、最大输出至少 8192 tokens 的模型：
+
+```fsharp
+open System
+open FSharp.ModelsDev.Catalog
+
+let filter = ModelFilter()
+filter.RequiredInputModalities <- [| "image" |]
+filter.RequiredCapabilities <- ModelCapabilities.ToolCalling
+filter.MinContextTokens <- Nullable 131072L
+filter.MinOutputTokens <- Nullable 8192L
+
+let matches = ModelCatalogQuery.FindModels(catalog, filter)
+```
+
+```csharp
+using System;
+using FSharp.ModelsDev.Catalog;
+
+var catalog = new SnapshotCatalog();
+var filter = new ModelFilter
+{
+    RequiredInputModalities = new[] { "image" },
+    RequiredCapabilities = ModelCapabilities.ToolCalling,
+    MinContextTokens = 131072L,
+    MinOutputTokens = 8192L
+};
+
+var matches = ModelCatalogQuery.FindModels(catalog, filter);
+```
+
+这些字段描述目录快照中的模型元数据，不保证当前 SDK 后端或具体传输支持相应模态，也不代表当前账户有权调用该模型。账户在线发现结果保持独立，不会自动合并到离线目录或补充其元数据。
+
 ### 3. 接入 Microsoft.Extensions.AI
 
 ```fsharp

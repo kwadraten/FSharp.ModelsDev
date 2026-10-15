@@ -65,14 +65,16 @@ type SnapshotCatalog() =
         (ProviderDefinition(providerId, name, baseUrl, protocolId, envVars, docUrl), modelsElement)
 
     static let hasModality (direction: string) (value: string) (modalities: JsonElement) =
-        match modalities.TryGetProperty(direction) with
-        | true, items when items.ValueKind = JsonValueKind.Array ->
-            let mutable found = false
-            for item in items.EnumerateArray() do
-                if not found && item.ValueKind = JsonValueKind.String && item.GetString() = value then
-                    found <- true
-            found
-        | _ -> false
+        if modalities.ValueKind <> JsonValueKind.Object then false
+        else
+            match modalities.TryGetProperty(direction) with
+            | true, items when items.ValueKind = JsonValueKind.Array ->
+                let mutable found = false
+                for item in items.EnumerateArray() do
+                    if not found && item.ValueKind = JsonValueKind.String && item.GetString() = value then
+                        found <- true
+                found
+            | _ -> false
 
     static let readCapabilities (model: JsonElement) =
         let mutable caps = ModelCapabilities.None
@@ -136,6 +138,34 @@ type SnapshotCatalog() =
             | true, limit when limit.ValueKind = JsonValueKind.Object ->
                 readLimit "context" limit, readLimit "output" limit
             | _ -> Nullable(), Nullable()
+        let readBool (name: string) =
+            match model.TryGetProperty(name) with
+            | true, p when p.ValueKind = JsonValueKind.True -> Nullable true
+            | true, p when p.ValueKind = JsonValueKind.False -> Nullable false
+            | _ -> Nullable()
+        let readModalities (direction: string) =
+            match model.TryGetProperty("modalities") with
+            | true, modalities when modalities.ValueKind = JsonValueKind.Object ->
+                match modalities.TryGetProperty(direction) with
+                | true, values -> readStringArray values :> IReadOnlyList<string>
+                | _ -> Array.empty<string> :> IReadOnlyList<string>
+            | _ -> Array.empty<string> :> IReadOnlyList<string>
+        let metadata = ModelMetadata()
+        metadata.MaxInputTokens <- (match model.TryGetProperty("limit") with
+                                    | true, limit when limit.ValueKind = JsonValueKind.Object -> readLimit "input" limit
+                                    | _ -> Nullable())
+        metadata.InputModalities <- readModalities "input"
+        metadata.OutputModalities <- readModalities "output"
+        metadata.Description <- tryString "description" model
+        metadata.Family <- tryString "family" model
+        metadata.ModelType <- tryString "type" model
+        metadata.Status <- tryString "status" model
+        metadata.KnowledgeCutoff <- tryString "knowledge" model
+        metadata.ReleaseDate <- tryString "release_date" model
+        metadata.LastUpdated <- tryString "last_updated" model
+        metadata.SupportsAttachments <- readBool "attachment"
+        metadata.SupportsTemperature <- readBool "temperature"
+        metadata.OpenWeights <- readBool "open_weights"
         ModelInfo(
             providerId,
             modelId,
@@ -144,7 +174,8 @@ type SnapshotCatalog() =
             readCapabilities model,
             contextLimit,
             maxOutputTokens,
-            readReasoningEfforts model)
+            readReasoningEfforts model,
+            metadata)
 
     static let emptyModels: IReadOnlyList<ModelInfo> = Array.empty<ModelInfo> :> IReadOnlyList<ModelInfo>
 
@@ -220,6 +251,10 @@ type SnapshotCatalog() =
             | _ -> emptyModels
 
     static let defaultInstance = SnapshotCatalog()
+
+    static member internal ParseModel(providerId: string, modelId: string, json: string) : ModelInfo =
+        use document = JsonDocument.Parse(json)
+        readModel providerId modelId document.RootElement
 
     interface IModelCatalog with
         member _.SnapshotVersion = snapshotVersion.Value
