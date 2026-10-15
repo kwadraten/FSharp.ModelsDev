@@ -304,4 +304,6 @@ let client = factory.CreateClient("openai-codex", "personal", codexModelId, opti
 
 ## 开发说明
 
+测试包含从 OpenCode 移植的 HTTP/SSE 录制回放：离线检查实际请求、流式工具调用往返及响应解析。来源和适配说明见 [录制样本说明](tests/FSharp.ModelsDev.Tests/Fixtures/Recordings/NOTICE.md)，运行和显式录制方式见 [AGENTS.md](AGENTS.md#httpsse-录制回放)。
+
 仓库设计约束、详细布局、开发验证和模型目录维护流程见 [AGENTS.md](AGENTS.md)。

@@ -76,11 +76,13 @@ module internal AsyncEnumerableBridge =
     let ofProducerWithCancellation (sourceToken: CancellationToken) (produce: ChannelWriter<'T> -> CancellationToken -> Task<unit>) : IAsyncEnumerable<'T> =
         ChannelAsyncEnumerable<'T>(produce, sourceToken) :> IAsyncEnumerable<'T>
 
-/// Default IChatTransport over HTTP, sharing one static HttpClient instance.
+/// HTTP transport. The default constructor shares an HttpClient; injected clients remain caller-owned.
 [<Sealed>]
-type HttpChatTransport() =
+type HttpChatTransport(client: HttpClient) =
 
-    static let client = new HttpClient()
+    static let sharedClient = new HttpClient()
+
+    do if isNull client then nullArg "client"
 
     static let isSuccess (code: int) = code >= 200 && code <= 299
 
@@ -90,6 +92,8 @@ type HttpChatTransport() =
         for KeyValue(k, v) in headers do
             msg.Headers.TryAddWithoutValidation(k, v) |> ignore
         msg
+
+    new() = HttpChatTransport(sharedClient)
 
     /// Sends a JSON POST and returns the full response; throws AiException on non-2xx.
     member _.Post(url: string, headers: IReadOnlyDictionary<string, string>, body: string, cancellationToken: CancellationToken) : Task<TransportResponse> =

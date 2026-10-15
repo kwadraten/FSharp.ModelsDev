@@ -128,6 +128,37 @@ dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- verify
 
 使用 `dotnet test --filter Category=Live` 单独运行。真实接口测试不发起交互式登录。
 
+### HTTP/SSE 录制回放
+
+`tests/FSharp.ModelsDev.Tests/Recording/` 是测试专用设施；通过注入 `HttpClient` 的 `HttpChatTransport` 观察实际 HTTP 请求，不能替换后端序列化或流解析。注入的 `HttpClient` 由调用者释放；默认构造方式继续使用共享客户端。样本及来源/许可证位于 `Fixtures/Recordings/`，不编译进 SDK，也不修改 models.dev 目录快照。
+
+- 默认只回放，缺失必需样本、请求不匹配、多余请求、未消费完交互或响应都必须失败，不能自动联网、录制或跳过。每个场景结尾调用 `VerifyComplete()`。
+- 按交互顺序匹配 method、URL、允许的 headers 与完整 JSON body；JSON 对象键顺序不重要，数组顺序及字段值必须相同。默认仅保留 `content-type`（规范化媒体类型）和 `anthropic-version`，不以凭据值参与匹配。
+- 录制须同时显式启用 `MODELSDEV_RECORD=1`、`MODELSDEV_LIVE_TESTS=1`，提供 `MODELSDEV_RECORDINGS_DIR` 及对应服务的 `MODELSDEV_<服务>_KEY/MODEL`。禁止在 CI/GITHUB_ACTIONS 环境录制，不覆盖已有文件；刷新时仅删除明确选中的样本后重新录制。
+- 凭据只能由宿主通过环境变量提供，不读取官方 CLI 凭据、不启动 CLI。录制工具脱敏认证 headers、URL/form 授权参数及 JSON/SSE 中的令牌和已知密钥；错误诊断不得回显请求 body 或凭据。
+- 成功执行断言、完整读取全部响应后才显式 `Save()`，原子创建录制文件；失败或取消不保存。提交前人工审阅样本、metadata 和 `sourceRequest`，自动脱敏不能替代审阅。
+- 当前支持 UTF-8 HTTP/JSON/SSE，不支持二进制/WebSocket。录制缓冲完整响应，回放人为分片字节但不模拟网络时序；超时、半途取消、阻塞读取等仍由独立传输测试覆盖。
+- 上游样本须固定来源提交并保留许可证；请求适配须明确记录，原始响应及来源 SHA-256 不得为了让测试通过而重写。上游样本回放通过不能描述为本库已通过真实服务验证。
+
+```powershell
+# 离线运行基础设施、四组上游样本及已有 local/ 样本。
+dotnet test FSharp.ModelsDev.slnx -c Release --filter Category=Recorded
+
+# 显式录制 OpenAI Chat 与 Responses（每个场景一次完整调用、一次流式调用）。
+$env:MODELSDEV_RECORD = "1"
+$env:MODELSDEV_LIVE_TESTS = "1"
+$env:MODELSDEV_RECORDINGS_DIR = Join-Path (Get-Location) "tests/FSharp.ModelsDev.Tests/Fixtures/Recordings"
+# MODELSDEV_OPENAI_KEY、MODELSDEV_OPENAI_MODEL 由宿主预先设置。
+dotnet test FSharp.ModelsDev.slnx -c Release --filter 'Category=Recording&FullyQualifiedName~OpenAI'
+
+# 关闭录制；审阅新增 local/*.json 后离线验证。
+Remove-Item Env:MODELSDEV_RECORD
+Remove-Item Env:MODELSDEV_LIVE_TESTS
+dotnet test FSharp.ModelsDev.slnx -c Release --filter Category=Recorded
+```
+
+Anthropic/Gemini 录制使用 `MODELSDEV_ANTHROPIC_KEY/MODEL`、`MODELSDEV_GEMINI_KEY/MODEL`，分别筛选 `FullyQualifiedName~Anthropic` 或 `FullyQualifiedName~Gemini`。只运行已配置的目标服务，新增本地样本通过公共 metadata 场景回放入口验证；手写协议样本应明确标为合成数据。
+
 ## 目录维护
 
 models.dev 快照（`catalog/models.snapshot.json` + `.sha256`）作为 EmbeddedResource 编译进程序集，普通构建与运行不联网。

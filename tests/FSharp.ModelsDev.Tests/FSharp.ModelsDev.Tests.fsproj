@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Recording/RecordedHttp.fs" />
+    <Compile Include="Recording/RecordedHttpTests.fs" />
+    <Compile Include="Recording/RecordedBackendTests.fs" />
+    <Compile Include="Recording/RecordedLiveTests.fs" />
     <Compile Include="CoreTests.fs" />
     <Compile Include="CatalogTests.fs" />
     <Compile Include="CatalogMetadataTests.fs" />
@@ -30,6 +34,10 @@
     <Compile Include="LiveBackendTests.fs" />
     <Compile Include="LiveSubscriptionTests.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures/Recordings/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
