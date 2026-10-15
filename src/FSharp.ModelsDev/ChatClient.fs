@@ -19,10 +19,15 @@ module internal ExceptionUtil =
 
 /// Runs a producer on a hot background task and exposes its output as an IAsyncEnumerable.
 [<Sealed>]
-type private ChannelAsyncEnumerable<'T>(produce: ChannelWriter<'T> -> CancellationToken -> Task<unit>) =
+type private ChannelAsyncEnumerable<'T>(produce: ChannelWriter<'T> -> CancellationToken -> Task<unit>, sourceToken: CancellationToken) =
     interface IAsyncEnumerable<'T> with
         member _.GetAsyncEnumerator(ct) =
-            let cts = CancellationTokenSource.CreateLinkedTokenSource(ct)
+            let cts =
+                if sourceToken.CanBeCanceled && ct.CanBeCanceled && sourceToken <> ct then
+                    CancellationTokenSource.CreateLinkedTokenSource(ct, sourceToken)
+                elif sourceToken.CanBeCanceled then CancellationTokenSource.CreateLinkedTokenSource(sourceToken)
+                elif ct.CanBeCanceled then CancellationTokenSource.CreateLinkedTokenSource(ct)
+                else new CancellationTokenSource()
             let channel = Channel.CreateUnbounded<'T>(UnboundedChannelOptions(SingleReader = true))
             let writer = channel.Writer
             let work: Task<unit> =
@@ -30,9 +35,7 @@ type private ChannelAsyncEnumerable<'T>(produce: ChannelWriter<'T> -> Cancellati
                     try
                         do! produce writer cts.Token
                         writer.Complete()
-                    with
-                    | :? OperationCanceledException when cts.IsCancellationRequested -> writer.Complete()
-                    | e -> writer.TryComplete(e) |> ignore
+                    with e -> writer.TryComplete(e) |> ignore
                 }
             ignore work
             let inner = channel.Reader.ReadAllAsync(cts.Token).GetAsyncEnumerator()
@@ -41,11 +44,37 @@ type private ChannelAsyncEnumerable<'T>(produce: ChannelWriter<'T> -> Cancellati
                 member _.MoveNextAsync() = inner.MoveNextAsync()
                 member _.DisposeAsync() =
                     cts.Cancel()
-                    inner.DisposeAsync() }
+                    let cleanup = task {
+                        let disposeResult = task {
+                            try
+                                do! inner.DisposeAsync().AsTask()
+                                return None
+                            with e -> return Some e
+                        }
+                        let producerResult = task {
+                            try
+                                do! work
+                                return None
+                            with
+                            | :? OperationCanceledException when cts.IsCancellationRequested -> return None
+                            | e -> return Some e
+                        }
+                        let! disposeError = disposeResult
+                        let! producerError = producerResult
+                        cts.Dispose()
+                        match disposeError, producerError with
+                        | Some error, _ -> return raise error
+                        | _, Some error -> return raise error
+                        | _ -> return ()
+                    }
+                    ValueTask(cleanup :> Task) }
 
 module internal AsyncEnumerableBridge =
     let ofProducer (produce: ChannelWriter<'T> -> CancellationToken -> Task<unit>) : IAsyncEnumerable<'T> =
-        ChannelAsyncEnumerable<'T>(produce) :> IAsyncEnumerable<'T>
+        ChannelAsyncEnumerable<'T>(produce, CancellationToken.None) :> IAsyncEnumerable<'T>
+
+    let ofProducerWithCancellation (sourceToken: CancellationToken) (produce: ChannelWriter<'T> -> CancellationToken -> Task<unit>) : IAsyncEnumerable<'T> =
+        ChannelAsyncEnumerable<'T>(produce, sourceToken) :> IAsyncEnumerable<'T>
 
 /// Default IChatTransport over HTTP, sharing one static HttpClient instance.
 [<Sealed>]
@@ -101,7 +130,7 @@ type HttpChatTransport() =
                     if hasNext then
                         do! writer.WriteAsync(enumerator.Current, ct).AsTask()
             }
-        AsyncEnumerableBridge.ofProducer produce
+        AsyncEnumerableBridge.ofProducerWithCancellation cancellationToken produce
 
     interface IChatTransport with
         member this.Post(url, headers, body, cancellationToken) = this.Post(url, headers, body, cancellationToken)
@@ -109,7 +138,22 @@ type HttpChatTransport() =
 
 /// Standalone chat model: IChatProtocol wire format over an IChatTransport endpoint.
 [<Sealed>]
-type ChatClient(model: string, protocol: IChatProtocol, transport: IChatTransport, url: string, headers: IReadOnlyDictionary<string, string>) =
+type ChatClient private (model: string, protocol: IChatProtocol, transport: IChatTransport, url: string, headers: IReadOnlyDictionary<string, string>, backend: IChatBackend) =
+
+    let resolveBackend (request: ChatRequest) =
+        if isNull backend then null
+        else
+            match backend with
+            | :? IRequestScopedBackend as scoped ->
+                let requestModel = if isNull request || String.IsNullOrEmpty request.Model then model else request.Model
+                scoped.ResolveBackend(requestModel)
+            | _ -> backend
+
+    new(model: string, protocol: IChatProtocol, transport: IChatTransport, url: string, headers: IReadOnlyDictionary<string, string>) =
+        ChatClient(model, protocol, transport, url, headers, null)
+
+    new(model: string, backend: IChatBackend, transport: IChatTransport) =
+        ChatClient(model, null, transport, null, null, backend)
 
     /// Model id sent with every request.
     member _.Model = model
@@ -117,31 +161,76 @@ type ChatClient(model: string, protocol: IChatProtocol, transport: IChatTranspor
     /// Runs a non-streaming completion; a Stream flag on the request is treated as false.
     member _.Complete(request: ChatRequest, cancellationToken: CancellationToken) : Task<ChatResponse> =
         task {
-            let body = protocol.SerializeRequest(request, false)
-            let! response = transport.Post(url, headers, body, cancellationToken)
-            if response.StatusCode >= 200 && response.StatusCode <= 299 then
-                return protocol.ParseResponse(response.Body)
+            let actualBackend = resolveBackend request
+            let mustStream =
+                match actualBackend with
+                | :? IStreamingCompletionBackend as streaming -> streaming.UseStreamingForCompletions
+                | _ -> false
+            if mustStream then
+                let! prepared = actualBackend.PrepareRequest(request, true, cancellationToken)
+                let lines = transport.PostStream(prepared.Url, prepared.Headers, prepared.Body, cancellationToken)
+                use enumerator = lines.GetAsyncEnumerator(cancellationToken)
+                let parser = actualBackend.CreateStreamParser()
+                let mutable more = true
+                while more do
+                    cancellationToken.ThrowIfCancellationRequested()
+                    let! hasNext = enumerator.MoveNextAsync().AsTask()
+                    more <- hasNext
+                    if hasNext then parser.PushLine(enumerator.Current) |> ignore
+                parser.Finish() |> ignore
+                match parser with
+                | :? IChatCompletionStreamParser as completionParser -> return completionParser.GetResponse()
+                | _ -> return raise (AiException(AiError.Decode "Streaming completion backend has no completed response parser."))
             else
-                return raise (AiException(AiError.Http(response.StatusCode, response.Body)))
+                let! prepared =
+                    if not (isNull actualBackend) then
+                        actualBackend.PrepareRequest(request, false, cancellationToken)
+                    else
+                        Task.FromResult(PreparedChatRequest(url, headers, protocol.SerializeRequest(request, false)))
+                let! response = transport.Post(prepared.Url, prepared.Headers, prepared.Body, cancellationToken)
+                if response.StatusCode >= 200 && response.StatusCode <= 299 then
+                    return if not (isNull actualBackend) then actualBackend.ParseResponse(response.Body) else protocol.ParseResponse(response.Body)
+                else
+                    return raise (AiException(AiError.Http(response.StatusCode, response.Body)))
         }
 
     /// Streams parsed ChatStreamEvents, skipping lines the protocol maps to null.
     member _.Stream(request: ChatRequest, cancellationToken: CancellationToken) : IAsyncEnumerable<ChatStreamEvent> =
-        let body = protocol.SerializeRequest(request, true)
-        let lines = transport.PostStream(url, headers, body, cancellationToken)
+        let actualBackend = resolveBackend request
         let produce (writer: ChannelWriter<ChatStreamEvent>) (ct: CancellationToken) : Task<unit> =
             task {
+                let! prepared =
+                    if not (isNull actualBackend) then
+                        actualBackend.PrepareRequest(request, true, ct)
+                    else
+                        Task.FromResult(PreparedChatRequest(url, headers, protocol.SerializeRequest(request, true)))
+                let lines = transport.PostStream(prepared.Url, prepared.Headers, prepared.Body, ct)
                 use enumerator = lines.GetAsyncEnumerator(ct)
-                let mutable more = true
-                while more do
-                    let! hasNext = enumerator.MoveNextAsync().AsTask()
-                    more <- hasNext
-                    if hasNext then
-                        let evt = protocol.TryParseStreamLine(enumerator.Current)
+                if not (isNull actualBackend) then
+                    // Parser state belongs to this enumeration; concurrent streams never share it.
+                    let parser = actualBackend.CreateStreamParser()
+                    let mutable more = true
+                    while more do
+                        let! hasNext = enumerator.MoveNextAsync().AsTask()
+                        more <- hasNext
+                        if hasNext then
+                            for evt in parser.PushLine(enumerator.Current) do
+                                if not (Object.ReferenceEquals(evt, null)) then
+                                    do! writer.WriteAsync(evt, ct).AsTask()
+                    for evt in parser.Finish() do
                         if not (Object.ReferenceEquals(evt, null)) then
                             do! writer.WriteAsync(evt, ct).AsTask()
+                else
+                    let mutable more = true
+                    while more do
+                        let! hasNext = enumerator.MoveNextAsync().AsTask()
+                        more <- hasNext
+                        if hasNext then
+                            let evt = protocol.TryParseStreamLine(enumerator.Current)
+                            if not (Object.ReferenceEquals(evt, null)) then
+                                do! writer.WriteAsync(evt, ct).AsTask()
             }
-        AsyncEnumerableBridge.ofProducer produce
+        AsyncEnumerableBridge.ofProducerWithCancellation cancellationToken produce
 
     interface IChatModel with
         member _.Model = model
@@ -160,15 +249,14 @@ type ChatClient(model: string, protocol: IChatProtocol, transport: IChatTranspor
             else
                 baseUrl
 
-        let url = baseUrl.TrimEnd('/') + "/chat/completions"
-        let headers = Dictionary<string, string>()
-        headers["Authorization"] <- $"Bearer {apiKey}"
-        let protocol = OpenAICompatibleChatProtocol() :> IChatProtocol
-
         let transport =
             if isNull transport then
                 HttpChatTransport() :> IChatTransport
             else
                 transport
 
-        ChatClient(model, protocol, transport, url, headers)
+        let options = ProviderOptions()
+        options.BaseUrl <- baseUrl
+        let credentials = ApiKeyCredentialProvider(apiKey) :> ICredentialProvider
+        let backend = OpenAIChatBackend(model, null, credentials, options) :> IChatBackend
+        ChatClient(model, backend, transport)

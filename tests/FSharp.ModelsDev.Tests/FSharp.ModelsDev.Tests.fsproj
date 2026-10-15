@@ -12,6 +12,21 @@
     <Compile Include="OpenAIProtocolTests.fs" />
     <Compile Include="CapabilityPolicyTests.fs" />
     <Compile Include="ExtensionsAIAdapterTests.fs" />
+    <Compile Include="OAuthAntigravityTests.fs" />
+    <Compile Include="ProviderAuthCoreTests.fs" />
+    <Compile Include="GrokOpenRouterAuthTests.fs" />
+    <Compile Include="KimiCodeAuthTests.fs" />
+    <Compile Include="GitHubCopilotAuthTests.fs" />
+    <Compile Include="KiloAuthTests.fs" />
+    <Compile Include="ClinePassAuthTests.fs" />
+    <Compile Include="NativeProtocolTests.fs" />
+    <Compile Include="ProviderBackendTests.fs" />
+    <Compile Include="CoreBackendTests.fs" />
+    <Compile Include="ResponsesBackendTests.fs" />
+    <Compile Include="BackendMeaiRoundTripTests.fs" />
+    <Compile Include="SubscriptionIntegrationTests.fs" />
+    <Compile Include="LiveBackendTests.fs" />
+    <Compile Include="LiveSubscriptionTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

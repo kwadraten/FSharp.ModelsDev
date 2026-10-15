@@ -26,6 +26,8 @@ type SnapshotCatalog() =
         | "@ai-sdk/openai" | "@ai-sdk/openai-compatible" -> "openai-chat"
         | "@ai-sdk/anthropic" -> "anthropic-messages"
         | "@ai-sdk/google" -> "gemini"
+        | "@ai-sdk/google-vertex" -> "vertex-gemini"
+        | "@ai-sdk/google-vertex/anthropic" -> "vertex-anthropic"
         | _ -> "unknown"
 
     static let tryString (name: string) (element: JsonElement) : string =

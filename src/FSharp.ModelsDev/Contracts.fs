@@ -55,6 +55,7 @@ type ChatMessage
     member _.Name = name
     member _.ToolCalls = toolCalls
     member _.ToolCallId = toolCallId
+    member val ProviderStateJson: string = null with get, set
 
     member _.Text =
         parts
@@ -94,6 +95,7 @@ type ChatRequest(model: string, messages: IReadOnlyList<ChatMessage>) =
     member val Stream = false with get, set
     member val Tools: IReadOnlyList<ToolDefinition> = null with get, set
     member val ReasoningEffort: string = null with get, set
+    member val ReasoningBudgetTokens: Nullable<int> = Nullable<int>() with get, set
     member val StopSequences: IReadOnlyList<string> = null with get, set
 
 [<Sealed; AllowNullLiteral>]
@@ -135,3 +137,9 @@ type Completed(finishReason: FinishReason, usage: Usage) =
     member _.FinishReason = finishReason
     member _.Usage = usage
     override _.Kind = "completed"
+
+[<Sealed; AllowNullLiteral>]
+type ProviderStateUpdate(stateJson: string) =
+    inherit ChatStreamEvent()
+    member _.StateJson = stateJson
+    override _.Kind = "provider-state"

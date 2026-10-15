@@ -1,30 +1,14 @@
 # FSharp.ModelsDev
 
-F# LLM API SDK（net8.0）：既可独立使用 `ChatClient`，也可经 `AsIChatClient()` 接入 Microsoft.Extensions.AI 的 `IChatClient`；内置 models.dev 离线模型目录。除 `Microsoft.Extensions.AI.Abstractions` 外无第三方依赖。
+F# LLM API SDK（net8.0）：支持 OpenAI、Google Gemini、Vertex AI、Anthropic 和 Antigravity；既可独立使用 `ChatClient`，也可经 `AsIChatClient()` 接入 Microsoft.Extensions.AI 的 `IChatClient`。内置 models.dev 离线模型目录；除 `Microsoft.Extensions.AI.Abstractions` 外无额外第三方运行时依赖。
 
 ## 仓库布局
 
-```
-FSharp.ModelsDev/
-├── src/FSharp.ModelsDev/                # 单 fsproj；文件编译顺序即内部分层（Contracts/Seams 约束先行）
-│   ├── Contracts.fs                 #   ChatMessage / ChatRequest / ChatResponse / ChatStreamEvent
-│   ├── Errors.fs                    #   AiError / AiException
-│   ├── Seams.fs                     #   IChatTransport / IChatProtocol / IChatModel / ICredentialProvider
-│   ├── CatalogTypes.fs              #   ModelInfo / ProviderDefinition / ModelCapabilities / ReasoningControl
-│   ├── IModelCatalog.fs             #   IModelCatalog（纯离线目录 seam）
-│   ├── Generated/*.g.fs             #   生成代码：ProviderIndex / ModelIndex
-│   ├── SnapshotCatalog.fs           #   内嵌快照的 IModelCatalog 实现
-│   ├── Sse.fs                       #   SSE 行切分
-│   ├── OpenAICompatible.fs          #   "openai-chat" 协议实现
-│   ├── CapabilityPolicy.fs          #   按 ModelCapabilities 校验/裁剪请求
-│   ├── Credentials.fs               #   ApiKeyCredentialProvider 等
-│   ├── ProviderRegistry.fs          #   providerId → protocol / credential / transport 组装
-│   ├── ChatClient.fs                #   ChatClient：独立入口（IChatModel）
-│   ├── ProviderFactory.fs           #   IChatClientFactory.CreateClient(providerId, accountId, modelId)
-│   └── MEAi/                        #   AsIChatClient()：IChatModel → Microsoft.Extensions.AI.IChatClient
-├── tests/FSharp.ModelsDev.Tests/        # 测试
-├── tools/FSharp.ModelsDev.Catalog.Generator/  # 目录生成器：update-catalog / verify
-└── catalog/                         # models.dev 快照（models.snapshot.json + .sha256）
+```text
+src/FSharp.ModelsDev/                      SDK 源码
+tests/FSharp.ModelsDev.Tests/              测试
+tools/FSharp.ModelsDev.Catalog.Generator/  模型目录生成器
+catalog/                                  内嵌 models.dev 快照
 ```
 
 ## 用法
@@ -106,35 +90,181 @@ task {
 |> ignore
 ```
 
-## 目录维护
+## 后端与认证
 
-models.dev 快照（`catalog/models.snapshot.json` + `.sha256`）作为 EmbeddedResource 编译进程序集，普通构建与运行不联网。
+所有后端提供非流式/流式聊天、工具调用和结果回传、图像输入，以及后端支持的推理控制。图像接受 data URI 或该接口原生支持的 URI；不支持的输入和参数会明确报错。
 
-```bash
-# 联网更新快照，并重新生成 src/FSharp.ModelsDev/Generated/*.g.fs
-dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- update-catalog
+| providerId | protocolId | 认证 |
+| --- | --- | --- |
+| `openai` 及兼容提供者 | `openai-chat`（默认） | Bearer API Key |
+| `openai`（显式选择） | `openai-responses` | Bearer API Key |
+| `openai-codex` | `codex-responses` | 宿主提供的 ChatGPT OAuth Bearer token |
+| `kimi-code-plan-cn` / `kimi-code-plan-global` | `kimi-code` | Kimi OAuth 或显式 API key |
+| `google` | `gemini` | `x-goog-api-key` |
+| `google-vertex` | `vertex-gemini` | 可刷新的 Google Bearer token + project/location |
+| `anthropic` | `anthropic-messages` | `x-api-key` |
+| `google-vertex-anthropic` | `vertex-anthropic` | 可刷新的 Google Bearer token + project/location |
+| `antigravity` | `antigravity` | Google OAuth 会话 + Cloud Code 项目 |
 
-# 校验快照与生成代码一致（CI 使用）
-dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- verify
+`antigravity` 是运行时内置提供者，不修改 models.dev 快照。工厂创建客户端时不读取凭据或访问网络；每次发出请求时异步获取当前凭据。
+
+### Gemini、Anthropic 与 Responses
+
+```fsharp
+open FSharp.ModelsDev
+open FSharp.ModelsDev.Catalog
+open FSharp.ModelsDev.Providers
+
+let catalog = SnapshotCatalog() :> IModelCatalog
+let google = ProviderFactory(catalog, ApiKeyCredentialProvider.Gemini(geminiApiKey))
+let gemini = google.CreateClient("google", "default", geminiModelId)
+
+let anthropic = ProviderFactory(catalog, ApiKeyCredentialProvider.Anthropic(anthropicApiKey))
+let claude = anthropic.CreateClient("anthropic", "default", claudeModelId)
+
+let openai = ProviderFactory(catalog, ApiKeyCredentialProvider(openaiApiKey))
+let responses =
+    openai.CreateClient(
+        "openai", "default", openaiModelId,
+        ProviderOptions(ProtocolId = "openai-responses"))
 ```
 
-## 设计约束
+`EnvCredentialProvider` 根据提供者选择正确的 API Key header；Vertex 的项目、区域、凭据文件环境变量只作为配置，不能代替 access token。
+其他 OpenAI 兼容提供者优先使用目录中的 API URL；目录未提供 URL 时，需要显式设置 `ProviderOptions.BaseUrl`。
 
-### Seam 边界
+### Vertex AI
 
-| Seam | 职责 | 不知道 |
+宿主通过异步回调获取当前 access token，可在宿主内使用 ADC、服务账户或自己的刷新机制。SDK 不执行 `gcloud` 子进程。
+
+```fsharp
+open System
+open System.Threading
+open System.Threading.Tasks
+
+// getCurrentGoogleToken: string -> CancellationToken -> Task<string>
+let credentials =
+    BearerTokenCredentialProvider(
+        Func<string, CancellationToken, Task<string>>(fun account ct ->
+            getCurrentGoogleToken account ct))
+
+let factory = ProviderFactory(catalog, credentials)
+let options = ProviderOptions(ProjectId = projectId, Location = location)
+let vertex = factory.CreateClient("google-vertex", "default", geminiModelId, options)
+let vertexClaude = factory.CreateClient("google-vertex-anthropic", "default", vertexClaudeModelId, options)
+```
+
+未显式设置 project/location 时读取 `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION`；缺失时提示配置。`global` 使用全局主机，模型 ID 应为相应 Vertex 提供者接受的 ID。
+
+### Antigravity OAuth
+
+Antigravity 是非官方兼容适配，使用 Cloud Code 内部接口。OAuth 客户端、scope、redirect URI 与 headers 的参考来源固定为 [opencode-antigravity-auth 的提交 16e0056](https://github.com/NoeFabris/opencode-antigravity-auth/tree/16e0056431d0a1291ee66e5938c732720b13a851)，可通过 `GoogleOAuthOptions` 和 `ProviderOptions` 覆盖。库不内置 OAuth Client ID 或 Client Secret，宿主必须显式提供与目标服务兼容的 OAuth 客户端配置。默认生成端点为 `https://cloudcode-pa.googleapis.com`。
+
+```fsharp
+open System.Diagnostics
+
+let store = InMemoryOAuthTokenStore() :> IOAuthTokenStore
+let oauthOptions = GoogleOAuthOptions()
+oauthOptions.ClientId <- Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_ID")
+// OAuth 客户端要求 secret 时由宿主提供；public client 可留空。
+oauthOptions.ClientSecret <- Environment.GetEnvironmentVariable("GOOGLE_OAUTH_CLIENT_SECRET")
+use credentials = new GoogleOAuthCredentialProvider(oauthOptions, store)
+
+let openBrowser =
+    Func<Uri, CancellationToken, Task>(fun uri _ ->
+        Process.Start(ProcessStartInfo(uri.AbsoluteUri, UseShellExecute = true)) |> ignore
+        Task.CompletedTask)
+
+task {
+    let! _ = credentials.Client.LoginAsync(openBrowser, "personal", CancellationToken.None)
+    let factory = ProviderFactory(catalog, credentials)
+    let client = factory.CreateClient("antigravity", "personal", antigravityModelId)
+    let! response =
+        client.Complete(
+            ChatRequest(antigravityModelId, [| ChatMessage.User "你好" |]),
+            CancellationToken.None)
+    printfn "%s" response.Message.Text
+}
+|> ignore
+```
+
+默认回调是 `http://localhost:51121/oauth-callback`，登录窗口有效期五分钟。也可使用 `BeginLogin()` 获取授权 URL，再将完整回调 URL 交给 `CompleteLoginAsync()`，由宿主控制交互。
+
+默认令牌只保存在内存；宿主可实现 `IOAuthTokenStore.LoadAsync/SaveAsync/DeleteAsync` 接入自己的持久化存储。存储按 accountId 隔离，保存 access token、refresh token、到期时间及项目。SDK 提前 60 秒刷新，并合并同一账户的并发刷新；工厂客户端在输出任何流事件之前遇到 401 最多刷新重试一次。
+
+项目优先使用 `ProviderOptions.ProjectId`，其次使用会话项目，再通过 `loadCodeAssist` 发现；无法发现时提示显式配置。`ProviderOptions.BaseUrl` 可覆盖后端根地址，`Headers` 可覆盖工厂请求的协议 headers。
+
+### 多轮工具调用与 Microsoft.Extensions.AI
+
+将返回的完整 assistant 消息加入历史，再加入 `ChatMessage.ToolResult(call.Id, result)`。`ProviderStateJson` 保存 thought signature、thinking 块或加密 reasoning item，应随消息保留；只取出 `.Text` 重建消息会丢失这些状态。
+
+`AsIChatClient()` 经 `AdditionalProperties["FSharp.ModelsDev.ProviderState"]` 保留状态，支持流聚合后继续工具调用；流中的 JSON 参数会按工具调用组装为完整 `FunctionCallContent`，最终用量只累计一次。一个 MEAI 工具消息包含多个结果时会逐个转换。
+
+`ChatRequest.ReasoningEffort` 映射原生 effort/level，`ReasoningBudgetTokens` 用于接受显式预算的模型；二者受模型能力限制。MEAI 调用可在 `ChatOptions.AdditionalProperties` 中设置 `FSharp.ModelsDev.ReasoningEffort`（string）、`FSharp.ModelsDev.ReasoningBudgetTokens`（int）。
+
+### 独立订阅登录与账户模型发现
+
+`ProviderAuthClient` 通过 HTTP 完成首次登录、令牌刷新和模型发现，无需安装官方 CLI，也不读取其凭据。支持以下预设：
+
+| 预设 | 工厂 providerId | 登录方式 |
 | --- | --- | --- |
-| `IModelCatalog` | 快照的纯离线查询（`SnapshotVersion` / `ProviderIds` / `TryGet` / `GetModels`） | 账户、凭据、HTTP |
-| `CapabilityPolicy` | 按 `ModelCapabilities` 校验/裁剪请求参数 | 凭据、传输细节 |
-| `IChatClientFactory`（`ProviderFactory`） | 按 `providerId + accountId + modelId` 组装 `IChatModel` | 线格式（归 Protocol）、快照内容（归 Catalog） |
-| `ICredentialProvider` | `accountId` → 请求 headers | 模型能力、目录 |
-| `IChatTransport` | POST 与 SSE 原始行 | 模型目录与能力 |
-| `IChatProtocol` | 契约类型 ↔ wire JSON | 凭据、账户、HTTP 实现 |
+| `ProviderAuthOptions.Grok()` | `grok` | 浏览器 PKCE 或设备码；订阅推理网关与 `xai` API key 接口分开 |
+| `ProviderAuthOptions.OpenRouter()` | `openrouter` | 浏览器 PKCE 或手动授权码，最终获取 API key |
+| `ProviderAuthOptions.KimiCode(false / true)` | `kimi-code-plan-cn` / `kimi-code-plan-global` | 国内 / 国际设备码 OAuth |
+| `ProviderAuthOptions.GitHubCopilot()` | `github-copilot` | GitHub 设备码，再交换短期 Copilot 推理令牌 |
+| `ProviderAuthOptions.Kilo()` | `kilo` | Kilo 设备授权；可设置 `OrganizationId` |
+| `ProviderAuthOptions.ClinePass()` | `cline-pass` | WorkOS 设备授权、Cline 注册及刷新 |
 
-### 公共 API 风格
+设备登录示例，浏览器交互由宿主决定：
 
-对外 .NET 友好：公共签名只使用 class / interface / enum / `Task` / `IAsyncEnumerable` / `IReadOnlyList` / 可空引用（null 表示缺省），不出现 F# DU / option / Result / list / currying；内部实现自由使用 F# 函数式风格。
+```fsharp
+open System.Threading
+open FSharp.ModelsDev
+open FSharp.ModelsDev.Catalog
+open FSharp.ModelsDev.Providers
 
-### 协议扩展点
+let store = InMemoryProviderAuthSessionStore()
+use auth = new ProviderAuthClient(ProviderAuthOptions.KimiCode(false), store)
 
-`ProtocolDefinition.ProtocolId` 是开放字符串（内置 `"openai-chat"`）。接入新协议只需实现 `IChatProtocol`（`SerializeRequest` / `ParseResponse` / `TryParseStreamLine`），注册到 registry 即可；provider → protocol 的绑定来自目录快照。
+task {
+    let ct = CancellationToken.None
+    let! device = auth.BeginDeviceLoginAsync(ct)
+    printfn "打开 %O，输入 %s" device.VerificationUri device.UserCode
+    let! _ = auth.CompleteDeviceLoginAsync(device, "personal", ct)
+
+    // 只有显式调用此方法才查询账户模型，不修改内嵌目录。
+    let! models = auth.DiscoverModelsAsync("personal", ct)
+    let selected = models[0] // 宿主应让用户选择，并处理空列表。
+    let factory = ProviderFactory(SnapshotCatalog(), auth.CreateCredentialProvider())
+    let model = factory.CreateClient("personal", selected)
+    let! response = model.Complete(ChatRequest(selected.ModelId, [| ChatMessage.User "你好" |]), ct)
+    printfn "%s" response.Message.Text
+}
+|> ignore
+```
+
+浏览器登录可调用 `BeginBrowserLoginAsync()` 获取地址，由宿主回传完整 callback URL 给 `CompleteBrowserLoginAsync(login, callbackUrl, accountId, ct)`。`LoginWithBrowserAsync(openBrowser, accountId, ct)` 则负责可选的本地回调监听；默认地址为 `http://localhost:51122/oauth-callback`。OpenRouter 无浏览器回调的宿主可先设置 `RedirectUri <- null`，再把页面显示的授权码交给完成方法。
+
+`ProviderAuthOptions` 支持端点和公开 client ID 配置；自定义部署须同时配置 `TrustedOrigins`。Copilot 使用 `EnterpriseDomain` 指定企业域，也可配置 `CopilotTokenEndpoint` 等端点。账户权限由服务端决定；登录成功不保证拥有每个模型的调用权限。
+
+默认会话仅保存在内存。宿主可实现 `IProviderAuthSessionStore` 持久化，键由 provider、认证域与账户组成；应保存完整会话，包括轮换后的刷新令牌及自有设备 ID。多个认证客户端共享同一存储实例时，进程内刷新会协调；跨进程持久化锁由宿主负责。使用凭据提供器期间请保持 `ProviderAuthClient` 存活。`LogoutAsync` 删除本地存储会话，不撤销服务端授权。
+
+发现结果按账户和认证域绑定，工厂不会自动发现模型或静默切换账户。Kimi Code 默认通过 `kimi-code` 后端调用 Messages 接口，保留结构化工具调用和 thinking 状态；需要兼容旧 Chat Completions 时可显式设置 `ProviderOptions.ProtocolId <- "openai-chat"`。需要 Kimi thinking/effort 控制时传入发现结果；`ProviderOptions.SessionId` 可配置会话缓存键。原有 API key 方式保留。OpenRouter 和 Kilo 不假定存在刷新协议，凭据被撤销后需要重新授权。可刷新会话遇到 401 时最多重试一次；已输出流事件的请求不会重放，403 不触发认证重试。
+
+### Codex 订阅的完整响应与流式调用
+
+`openai-codex` 使用 `https://chatgpt.com/backend-api/codex` 和 `codex-responses` 协议。该接口要求 HTTP 请求启用流式；本库的 `Complete()` 会读取流并从终止响应返回完整 `ChatResponse`，保留响应 ID、模型、工具调用、reasoning 状态与用量，MEAI 的 `GetResponseAsync()` 同样适用。`Stream()` 继续逐事件输出。
+
+```fsharp
+// accessToken 与 chatgptAccountId 由宿主的认证集成提供；库不读取本机 CLI 文件。
+let headers = System.Collections.Generic.Dictionary<string, string>()
+headers["ChatGPT-Account-Id"] <- chatgptAccountId
+let options = ProviderOptions(Headers = headers)
+let factory = ProviderFactory(catalog, ApiKeyCredentialProvider(accessToken))
+let client = factory.CreateClient("openai-codex", "personal", codexModelId, options)
+```
+
+已有 `openai` + `openai-responses` 配置若明确使用同一 ChatGPT Codex 地址，也会启用该聚合方式。普通 OpenAI Responses API 的 `Complete()` 保持非流式 POST。这里提供订阅请求适配；完整的 Codex 登录及令牌续期仍由宿主负责。
+
+## 开发说明
+
+仓库设计约束、详细布局、开发验证和模型目录维护流程见 [AGENTS.md](AGENTS.md)。

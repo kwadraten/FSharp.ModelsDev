@@ -1,6 +1,7 @@
 namespace FSharp.ModelsDev.MEAi
 
 open System
+open System.Collections.Generic
 open System.Runtime.CompilerServices
 open System.Threading
 open FSharp.ModelsDev
@@ -28,8 +29,14 @@ type ModelsDevChatClient(model: FSharp.ModelsDev.IChatModel) =
             if isNull messages then
                 nullArg (nameof messages)
             let request = Conversions.requestFromAi model.Model messages options true
-            model.Stream(request, cancellationToken)
-            |> AsyncEnumerableBridge.map Conversions.updateFromEvent cancellationToken
+            let source = model.Stream(request, cancellationToken)
+            { new IAsyncEnumerable<ChatResponseUpdate> with
+                member _.GetAsyncEnumerator(consumerToken) =
+                    let convert = Conversions.createEventConverter ()
+                    let updates =
+                        source
+                        |> AsyncEnumerableBridge.mapMany (fun event -> convert event :> seq<_>) cancellationToken
+                    updates.GetAsyncEnumerator(consumerToken) }
 
         member this.GetService(serviceType, serviceKey) =
             if serviceType = typeof<IChatClient> || serviceType = typeof<ModelsDevChatClient> then

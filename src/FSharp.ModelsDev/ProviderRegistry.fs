@@ -16,6 +16,7 @@ type ProviderRegistry() =
         lazy (
             let registry = ProviderRegistry()
             registry.Register("openai", "openai-chat")
+            registry.Register("openai-codex", "codex-responses")
             registry.Register("openrouter", "openai-chat")
             registry.Register("deepinfra", "openai-chat")
             registry.Register("groq", "openai-chat")
@@ -25,8 +26,17 @@ type ProviderRegistry() =
             registry.Register("fireworks-ai", "openai-chat")
             registry.Register("mistral", "openai-chat")
             registry.Register("xai", "openai-chat")
+            registry.Register("grok", "openai-chat")
+            registry.Register("kimi-code-plan-cn", "kimi-code")
+            registry.Register("kimi-code-plan-global", "kimi-code")
+            registry.Register("github-copilot", "openai-chat")
+            registry.Register("kilo", "openai-chat")
+            registry.Register("cline-pass", "openai-chat")
             registry.Register("anthropic", "anthropic-messages")
             registry.Register("google", "gemini")
+            registry.Register("google-vertex", "vertex-gemini")
+            registry.Register("google-vertex-anthropic", "vertex-anthropic")
+            registry.Register("antigravity", "antigravity")
             registry
         )
 
@@ -53,7 +63,7 @@ type ProviderRegistry() =
 
         modelOverrides.[(providerId, modelId)] <- protocolId
 
-    /// Resolves the protocol id: model override, then the catalog's provider definition, then registry registrations, then "unknown".
+    /// Model overrides come first. Specialized service adapters take precedence over generic catalog transports.
     member _.ResolveProtocol(providerId: string, modelId: string, catalog: IModelCatalog): string =
         match modelOverrides.TryGetValue((providerId, modelId)) with
         | (true, protocolId) -> protocolId
@@ -70,12 +80,17 @@ type ProviderRegistry() =
                 else
                     null
 
-            match catalogProtocolId with
-            | null ->
+            let specialized =
+                match providers.TryGetValue(providerId) with
+                | true, "kimi-code" -> "kimi-code"
+                | _ -> null
+            match specialized, catalogProtocolId with
+            | protocolId, _ when not (isNull protocolId) -> protocolId
+            | _, null ->
                 match providers.TryGetValue(providerId) with
                 | (true, protocolId) -> protocolId
                 | _ -> "unknown"
-            | protocolId -> protocolId
+            | _, protocolId -> protocolId
 
     /// Shared registry with curated protocol defaults for well-known providers.
     static member Default: ProviderRegistry = defaultRegistry.Force()

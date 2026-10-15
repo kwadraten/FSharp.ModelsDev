@@ -5,6 +5,37 @@ open System.Threading
 open System.Threading.Tasks
 
 [<Sealed; AllowNullLiteral>]
+type PreparedChatRequest(url: string, headers: IReadOnlyDictionary<string, string>, body: string) =
+    member _.Url = url
+    member _.Headers = headers
+    member _.Body = body
+
+[<AllowNullLiteral>]
+type IChatStreamParser =
+    abstract PushLine: line: string -> IReadOnlyList<ChatStreamEvent>
+    abstract Finish: unit -> IReadOnlyList<ChatStreamEvent>
+
+[<AllowNullLiteral>]
+type IChatBackend =
+    abstract PrepareRequest: request: ChatRequest * stream: bool * cancellationToken: CancellationToken -> Task<PreparedChatRequest>
+    abstract ParseResponse: body: string -> ChatResponse
+    abstract CreateStreamParser: unit -> IChatStreamParser
+
+/// Backends whose upstream requires streaming even for a completed-response call.
+[<AllowNullLiteral>]
+type IStreamingCompletionBackend =
+    abstract UseStreamingForCompletions: bool
+
+/// A stream parser capable of returning the authoritative completed response.
+[<AllowNullLiteral>]
+type IChatCompletionStreamParser =
+    abstract GetResponse: unit -> ChatResponse
+
+[<AllowNullLiteral>]
+type internal IRequestScopedBackend =
+    abstract ResolveBackend: model: string -> IChatBackend
+
+[<Sealed; AllowNullLiteral>]
 type TransportResponse(statusCode: int, body: string) =
     member _.StatusCode = statusCode
     member _.Body = body
