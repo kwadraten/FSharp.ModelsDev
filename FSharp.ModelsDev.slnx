@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FSharp.ModelsDev/FSharp.ModelsDev.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FSharp.ModelsDev.Tests/FSharp.ModelsDev.Tests.fsproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/FSharp.ModelsDev.Catalog.Generator/FSharp.ModelsDev.Catalog.Generator.fsproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>FSharp.ModelsDev.Catalog.Generator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Schema.fs" />
+    <Compile Include="Normalize.fs" />
+    <Compile Include="GenerateSource.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,42 @@
+# .NET build output (including isolated agent builds)
+[Bb]in/
+[Oo]bj/
+bin.*/
+obj.*/
+/artifacts/
+
+# IDE caches and per-user settings
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results and coverage reports
+[Tt]est[Rr]esults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# NuGet package output (keep dependency lock files)
+*.nupkg
+*.snupkg
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Temporary files and operating-system metadata
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+~$*
+.DS_Store
+Thumbs.db
+Desktop.ini

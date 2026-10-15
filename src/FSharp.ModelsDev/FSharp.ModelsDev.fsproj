@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FSharp.ModelsDev</RootNamespace>
+    <PackageId>FSharp.ModelsDev</PackageId>
+    <Description>F# LLM API SDK: standalone chat client, Models.dev offline catalog, Microsoft.Extensions.AI IChatClient adapter.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Contracts.fs" />
+    <Compile Include="Errors.fs" />
+    <Compile Include="Seams.fs" />
+    <Compile Include="CatalogTypes.fs" />
+    <Compile Include="IModelCatalog.fs" />
+    <Compile Include="Generated/ProviderIndex.g.fs" />
+    <Compile Include="Generated/ModelIndex.g.fs" />
+    <Compile Include="SnapshotCatalog.fs" />
+    <Compile Include="Sse.fs" />
+    <Compile Include="OpenAICompatible.fs" />
+    <Compile Include="CapabilityPolicy.fs" />
+    <Compile Include="Credentials.fs" />
+    <Compile Include="ProviderRegistry.fs" />
+    <Compile Include="ChatClient.fs" />
+    <Compile Include="ProviderFactory.fs" />
+    <Compile Include="MEAi/Conversions.fs" />
+    <Compile Include="MEAi/ModelsDevChatClient.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../../catalog/models.snapshot.json">
+      <LogicalName>FSharp.ModelsDev.models.snapshot.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
+  </ItemGroup>
+
+</Project>
