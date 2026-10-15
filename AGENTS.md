@@ -181,7 +181,7 @@ dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- update-catalog
 dotnet run --project tools/FSharp.ModelsDev.Catalog.Generator -- verify
 ```
 
-更新快照或生成逻辑后，确保快照、校验和与生成索引保持一致，并运行 `verify`；生成文件的变更应来自生成器。
+`.gitattributes` 保留快照原始字节，并将校验和及生成索引固定为 LF，避免 Windows checkout 改写内容。更新快照或生成逻辑后，确保快照、校验和与生成索引保持一致，并运行 `verify`；生成文件的变更应来自生成器。
 
 ## CI 与 NuGet 发布
 
