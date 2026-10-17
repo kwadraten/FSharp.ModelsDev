@@ -71,16 +71,20 @@ let private sha256Hex (bytes: byte[]) : string =
     sb.ToString()
 
 /// Parses and normalizes a snapshot, then renders both generated index files.
-let private buildOutputs (snapshotBytes: byte[]) : string * string * Normalize.NormalizedProvider list =
+let private buildOutputs (repoRoot: string) (snapshotBytes: byte[]) =
     let json = Encoding.UTF8.GetString(snapshotBytes)
-    let providers = Schema.parseApiJson json |> Normalize.normalize
+    let supplement = File.ReadAllText(Path.Combine(repoRoot, "catalog", "sdk.providers.json"))
+    let providers = (Schema.parseApiJson json @ Schema.parseApiJson supplement) |> Normalize.normalize
+    let ids = providers |> List.map (fun p -> p.Id)
+    if List.distinct ids <> ids then invalidOp "Duplicate provider in snapshot and SDK supplements."
     let providerIds = providers |> List.map (fun provider -> provider.Id)
 
     let modelKeys =
         providers
         |> List.collect (fun provider -> provider.Models |> List.map (fun model -> (provider.Id, model.Id)))
 
-    GenerateSource.generateProviderIndex providerIds, GenerateSource.generateModelIndex modelKeys, providers
+    GenerateSource.generateProviderIndex providerIds, GenerateSource.generateModelIndex modelKeys,
+    GenerateSource.generateCatalogData ((sha256Hex snapshotBytes).Substring(0, 12)) [json; supplement], providers
 
 let private writeText (path: string) (content: string) : unit =
     File.WriteAllText(path, content, UTF8Encoding(false))
@@ -95,7 +99,7 @@ let private runUpdateCatalog (options: Options) : int =
 
         try
             let snapshotBytes = (loadSourceBytes source).GetAwaiter().GetResult()
-            let providerSource, modelSource, providers = buildOutputs snapshotBytes
+            let providerSource, modelSource, catalogSource, providers = buildOutputs repoRoot snapshotBytes
             let catalogDir = Path.Combine(repoRoot, "catalog")
             let generatedDir = Path.Combine(repoRoot, "src", "FSharp.ModelsDev", "Generated")
             Directory.CreateDirectory(generatedDir) |> ignore
@@ -104,6 +108,7 @@ let private runUpdateCatalog (options: Options) : int =
             writeText (Path.Combine(catalogDir, "models.snapshot.sha256")) (sha256Hex snapshotBytes + "\n")
             writeText (Path.Combine(generatedDir, "ProviderIndex.g.fs")) providerSource
             writeText (Path.Combine(generatedDir, "ModelIndex.g.fs")) modelSource
+            writeText (Path.Combine(generatedDir, "CatalogData.g.fs")) catalogSource
 
             let modelCount = providers |> List.sumBy (fun provider -> provider.Models.Length)
             printfn "catalog updated from %s" source
@@ -133,7 +138,7 @@ let private runVerify (options: Options) : int =
             ok <- false
             printfn "MISMATCH sha256: %s is %s but %s records %s" snapshotPath actualSha shaPath recordedSha
 
-        let providerSource, modelSource, _ = buildOutputs snapshotBytes
+        let providerSource, modelSource, catalogSource, _ = buildOutputs repoRoot snapshotBytes
 
         let checkFile (name: string) (expected: string) =
             let path = Path.Combine(generatedDir, name)
@@ -156,6 +161,7 @@ let private runVerify (options: Options) : int =
 
         checkFile "ProviderIndex.g.fs" providerSource
         checkFile "ModelIndex.g.fs" modelSource
+        checkFile "CatalogData.g.fs" catalogSource
 
         if ok then
             printfn "OK: snapshot sha256 matches and generated indexes are in sync"

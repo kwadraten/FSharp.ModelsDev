@@ -76,7 +76,7 @@ ask().GetAwaiter().GetResult()
 
 ## Offline model selection
 
-`SnapshotCatalog` queries an embedded snapshot without HTTP, credentials, or a separate data download. Model offerings are identified by provider and model ID; different providers may expose different limits for the same underlying model.
+`SnapshotCatalog` queries F# data compiled from the snapshot without HTTP, credentials, a separate data download, or runtime JSON parsing. Model offerings are identified by provider and model ID; different providers may expose different limits for the same underlying model.
 
 ```fsharp
 open FSharp.ModelsDev.Catalog

@@ -29,6 +29,7 @@
     <Compile Include="ModelCatalogQuery.fs" />
     <Compile Include="Generated/ProviderIndex.g.fs" />
     <Compile Include="Generated/ModelIndex.g.fs" />
+    <Compile Include="Generated/CatalogData.g.fs" />
     <Compile Include="SnapshotCatalog.fs" />
     <Compile Include="Sse.fs" />
     <Compile Include="OpenAICompatible.fs" />
@@ -61,9 +62,7 @@
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../README.zh-CN.md" Pack="true" PackagePath="/" />
     <None Include="../../LICENSE" Pack="true" PackagePath="/" />
-    <EmbeddedResource Include="../../catalog/models.snapshot.json">
-      <LogicalName>FSharp.ModelsDev.models.snapshot.json</LogicalName>
-    </EmbeddedResource>
+
   </ItemGroup>
 
   <ItemGroup>

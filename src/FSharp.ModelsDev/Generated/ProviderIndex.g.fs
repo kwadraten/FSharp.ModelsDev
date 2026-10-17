@@ -27,6 +27,7 @@ module ProviderIndex =
         "ambient"
         "amd"
         "anthropic"
+        "antigravity"
         "anyapi"
         "arcee"
         "atomic-chat"

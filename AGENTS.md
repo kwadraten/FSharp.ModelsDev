@@ -26,7 +26,7 @@ FSharp.ModelsDev/
 │   ├── CatalogTypes.fs              #   ModelInfo / ModelMetadata / ModelFilter / ProviderDefinition / ModelCapabilities
 │   ├── IModelCatalog.fs             #   IModelCatalog（纯离线目录 seam）
 │   ├── ModelCatalogQuery.fs         #   目录与模型集合的离线组合筛选
-│   ├── Generated/*.g.fs             #   生成代码：ProviderIndex / ModelIndex
+│   ├── Generated/*.g.fs             #   生成代码：ProviderIndex / ModelIndex / CatalogData
 │   ├── SnapshotCatalog.fs           #   内嵌快照的 IModelCatalog 实现
 │   ├── BackendCore.fs              #   多事件 SSE 帧解析
 │   ├── Sse.fs                       #   SSE 行切分
@@ -165,7 +165,7 @@ Anthropic/Gemini 录制使用 `MODELSDEV_ANTHROPIC_KEY/MODEL`、`MODELSDEV_GEMIN
 
 ## 目录维护
 
-models.dev 快照（`catalog/models.snapshot.json` + `.sha256`）作为 EmbeddedResource 编译进程序集，普通构建与运行不联网。
+models.dev 快照（`catalog/models.snapshot.json` + `.sha256`）由生成器展开为 `Generated/CatalogData.g.fs` 的 F# 构造表达式，运行时不解析目录 JSON；普通构建与运行不联网。`catalog/sdk.providers.json` 维护本库补充 provider；Antigravity 仅注册 provider，模型 ID 由宿主显式调用订阅发现获取，不写入离线目录。
 
 `ModelInfo` 的目录元数据包括 `MaxInputTokens`、输入/输出模态、描述、family、model type、status、knowledge cutoff、发布日期、最后更新时间、附件/温度支持标记及开放权重标记；新增可选元数据应以 nullable 值或空列表表达未知。时间及日期字段保留快照原始字符串（包括部分日期）。`ModelInfo` 的元数据构造重载必须快照复制可变 `ModelMetadata` DTO 及其模态列表，保留旧构造重载，并使旧重载的新属性保持未知。
 

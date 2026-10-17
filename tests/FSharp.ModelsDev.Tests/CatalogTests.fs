@@ -77,3 +77,14 @@ type CatalogTests() =
         let catalog = SnapshotCatalog()
         let mutable provider = Unchecked.defaultof<ProviderDefinition>
         Assert.False(catalog.TryGetProvider("provider-that-does-not-exist", &provider))
+
+    [<Fact>]
+    member _.``Antigravity is an offline provider with subscription scoped models`` () =
+        let catalog = SnapshotCatalog()
+        let mutable provider = Unchecked.defaultof<ProviderDefinition>
+        Assert.Contains("antigravity", catalog.ProviderIds)
+        Assert.True(catalog.TryGetProvider("antigravity", &provider))
+        Assert.Equal("antigravity", provider.ProtocolId)
+        Assert.Empty(catalog.GetModels("antigravity"))
+        let mutable model = Unchecked.defaultof<ModelInfo>
+        Assert.False(catalog.TryGet("antigravity", "gemini-2.5-pro", &model))

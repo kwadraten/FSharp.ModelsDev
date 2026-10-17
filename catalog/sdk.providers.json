@@ -1,0 +1,8 @@
+{
+  "antigravity": {
+    "id": "antigravity",
+    "name": "Antigravity (unofficial compatibility adapter)",
+    "npm": "antigravity",
+    "models": {}
+  }
+}

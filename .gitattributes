@@ -2,3 +2,5 @@
 /catalog/models.snapshot.json -text
 /catalog/models.snapshot.sha256 text eol=lf
 /src/FSharp.ModelsDev/Generated/*.g.fs text eol=lf
+
+/catalog/sdk.providers.json text eol=lf

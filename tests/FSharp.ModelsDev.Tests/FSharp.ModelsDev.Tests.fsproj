@@ -13,6 +13,7 @@
     <Compile Include="Recording/RecordedLiveTests.fs" />
     <Compile Include="CoreTests.fs" />
     <Compile Include="CatalogTests.fs" />
+    <Compile Include="../../tools/FSharp.ModelsDev.Catalog.Generator/CatalogParser.fs" Link="CatalogParser.fs" />
     <Compile Include="CatalogMetadataTests.fs" />
     <Compile Include="ModelCatalogQueryTests.fs" />
     <Compile Include="OpenAIProtocolTests.fs" />
@@ -37,6 +38,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="../../catalog/models.snapshot.json" Link="models.snapshot.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures/Recordings/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

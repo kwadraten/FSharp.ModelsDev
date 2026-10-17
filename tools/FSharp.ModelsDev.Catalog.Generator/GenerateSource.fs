@@ -42,3 +42,58 @@ let generateModelIndex (modelKeys: seq<string * string>) : string =
 
     sb.Append("    |]\n") |> ignore
     sb.ToString()
+
+
+/// Emits constructor expressions, never serialized JSON, for every catalog field.
+let generateCatalogData (snapshotVersion: string) (sources: string list) =
+    let quote (value: string) = if isNull value then "null" else "\"" + escapeString value + "\""
+    let strings (values: seq<string>) = "[| " + (values |> Seq.map quote |> String.concat "; ") + " |]"
+    let number (value: System.Nullable<int64>) = if value.HasValue then sprintf "Nullable(%dL)" value.Value else "Nullable<int64>()"
+    let boolean (value: System.Nullable<bool>) = if value.HasValue then (if value.Value then "Nullable(true)" else "Nullable(false)") else "Nullable<bool>()"
+    let sb = StringBuilder(fileHeader)
+    sb.Append("\nopen System\nopen System.Collections.Generic\nopen FSharp.ModelsDev.Catalog\n\nmodule internal CatalogData =\n") |> ignore
+    sb.AppendFormat("    let snapshotVersion = {0}\n", quote snapshotVersion) |> ignore
+    let providers =
+        [ for source in sources do
+            use doc = System.Text.Json.JsonDocument.Parse(source)
+            for property in doc.RootElement.EnumerateObject() do
+                let definition, models = CatalogParser.readProvider property.Name property.Value
+                let models =
+                    if models.ValueKind = System.Text.Json.JsonValueKind.Object then
+                        [ for model in models.EnumerateObject() do
+                            if model.Value.ValueKind = System.Text.Json.JsonValueKind.Object then
+                                yield CatalogParser.readModel property.Name model.Name model.Value ]
+                    else []
+                yield definition, models |> List.sortBy (fun model -> model.ModelId) ]
+        |> List.sortBy (fun (provider, _) -> provider.ProviderId)
+    for i, (_, models) in List.indexed providers do
+        for chunkIndex, chunk in models |> List.chunkBySize 16 |> List.indexed do
+            sb.AppendFormat("    let private models{0}_{1} () = [|\n", i, chunkIndex) |> ignore
+            for model in chunk do
+                let metadata =
+                    [ "MaxInputTokens", number model.MaxInputTokens
+                      "InputModalities", strings model.InputModalities
+                      "OutputModalities", strings model.OutputModalities
+                      "Description", quote model.Description
+                      "Family", quote model.Family
+                      "ModelType", quote model.ModelType
+                      "Status", quote model.Status
+                      "KnowledgeCutoff", quote model.KnowledgeCutoff
+                      "ReleaseDate", quote model.ReleaseDate
+                      "LastUpdated", quote model.LastUpdated
+                      "SupportsAttachments", boolean model.SupportsAttachments
+                      "SupportsTemperature", boolean model.SupportsTemperature
+                      "OpenWeights", boolean model.OpenWeights ]
+                    |> List.map (fun (name, value) -> name + " = " + value)
+                    |> String.concat ", "
+                sb.AppendFormat("        ModelInfo({0}, {1}, {2}, {3}, enum<ModelCapabilities> {4}, {5}, {6}, {7}, ModelMetadata({8}))\n",
+                    quote model.ProviderId, quote model.ModelId, quote model.DisplayName, quote model.CanonicalModelId,
+                    int model.Capabilities, number model.ContextLimit, number model.MaxOutputTokens, strings model.ReasoningEfforts, metadata) |> ignore
+            sb.Append("    |]\n") |> ignore
+    sb.Append("    let providers: (ProviderDefinition * Lazy<IReadOnlyList<ModelInfo>>)[] = [|\n") |> ignore
+    for i, (provider, models) in List.indexed providers do
+        let chunks = models |> List.chunkBySize 16 |> List.mapi (fun j _ -> sprintf "models%d_%d ()" i j) |> String.concat "; "
+        sb.AppendFormat("        ProviderDefinition({0}, {1}, {2}, {3}, {4}, {5}), lazy (Array.concat [| {6} |] |> Array.AsReadOnly :> IReadOnlyList<ModelInfo>)\n",
+            quote provider.ProviderId, quote provider.Name, quote provider.BaseUrl, quote provider.ProtocolId, strings provider.EnvVars, quote provider.DocUrl, chunks) |> ignore
+    sb.Append("    |]\n") |> ignore
+    sb.ToString()

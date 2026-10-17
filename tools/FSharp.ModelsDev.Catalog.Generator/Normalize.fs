@@ -24,6 +24,7 @@ type NormalizedProvider =
 /// Maps the provider npm package onto the wire protocol the SDK implements for it.
 let inferProtocolId (npm: string) : string =
     if System.String.IsNullOrEmpty(npm) then "unknown"
+    elif npm = "antigravity" then "antigravity"
     elif npm = "@ai-sdk/google-vertex/anthropic" then "vertex-anthropic"
     elif npm = "@ai-sdk/google-vertex" then "vertex-gemini"
     elif npm.Contains("openai") then "openai-chat"

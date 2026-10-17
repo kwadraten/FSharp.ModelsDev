@@ -11,7 +11,7 @@ type CatalogMetadataTests() =
     [<Fact>]
     member _.``metadata parses snapshot fields and preserves unknown modalities`` () =
         let json = """{"description":"desc","family":"fam","type":"chat","status":"active","knowledge":"2025-01","release_date":"2025-02-01","last_updated":"2025-03-01","attachment":false,"temperature":true,"open_weights":false,"modalities":{"input":["text","point-cloud",17,null],"output":["text","audio",false]},"limit":{"input":0}}"""
-        let model = SnapshotCatalog.ParseModel("p", "m", json)
+        let model = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("p", "m", json)
         Assert.Equal("desc", model.Description)
         Assert.Equal("fam", model.Family)
         Assert.Equal("chat", model.ModelType)
@@ -33,7 +33,7 @@ type CatalogMetadataTests() =
     [<InlineData("{\"description\":null,\"family\":4,\"type\":false,\"status\":[],\"knowledge\":{},\"release_date\":null,\"last_updated\":1,\"attachment\":null,\"temperature\":0,\"open_weights\":\"false\",\"limit\":null,\"modalities\":null}")>]
     [<InlineData("{\"limit\":[],\"modalities\":{\"input\":null,\"output\":{}}}")>]
     member _.``missing null and malformed metadata remains unknown without throwing`` (json: string) =
-        let model = SnapshotCatalog.ParseModel("p", "m", json)
+        let model = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("p", "m", json)
         Assert.Null(model.Description)
         Assert.False(model.MaxInputTokens.HasValue)
         Assert.False(model.SupportsAttachments.HasValue)
@@ -44,8 +44,8 @@ type CatalogMetadataTests() =
 
     [<Fact>]
     member _.``metadata parsing keeps provider scoped model identity`` () =
-        let a = SnapshotCatalog.ParseModel("provider-a", "model", """{"canonical_model_id":"shared/model","limit":{"context":101,"input":91,"output":11},"modalities":{"input":["image"],"output":["text"]}}""")
-        let b = SnapshotCatalog.ParseModel("provider-b", "model", """{"canonical_model_id":"shared/model","limit":{"context":202,"input":182,"output":22},"modalities":{"input":["audio"],"output":["json"]}}""")
+        let a = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("provider-a", "model", """{"canonical_model_id":"shared/model","limit":{"context":101,"input":91,"output":11},"modalities":{"input":["image"],"output":["text"]}}""")
+        let b = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("provider-b", "model", """{"canonical_model_id":"shared/model","limit":{"context":202,"input":182,"output":22},"modalities":{"input":["audio"],"output":["json"]}}""")
         Assert.Equal("provider-a", a.ProviderId)
         Assert.Equal("provider-b", b.ProviderId)
         Assert.Equal("shared/model", a.CanonicalModelId)
@@ -63,8 +63,8 @@ type CatalogMetadataTests() =
 
     [<Fact>]
     member _.``zero limits are retained and absent input is not inferred`` () =
-        let zero = SnapshotCatalog.ParseModel("p", "zero", """{"limit":{"context":0,"input":0,"output":0}}""")
-        let missing = SnapshotCatalog.ParseModel("p", "missing", """{"limit":{"context":12,"output":4}}""")
+        let zero = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("p", "zero", """{"limit":{"context":0,"input":0,"output":0}}""")
+        let missing = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("p", "missing", """{"limit":{"context":12,"output":4}}""")
         Assert.Equal(0L, zero.ContextLimit.Value)
         Assert.Equal(0L, zero.MaxInputTokens.Value)
         Assert.Equal(0L, zero.MaxOutputTokens.Value)
@@ -74,7 +74,7 @@ type CatalogMetadataTests() =
     [<InlineData("1.5")>]
     [<InlineData("9223372036854775808")>]
     member _.``malformed numeric input limits remain unknown`` (value: string) =
-        let model = SnapshotCatalog.ParseModel("p", "m", "{\"limit\":{\"input\":" + value + "}}")
+        let model = FSharp.ModelsDev.Catalog.Generator.CatalogParser.parseModel("p", "m", "{\"limit\":{\"input\":" + value + "}}")
         Assert.False(model.MaxInputTokens.HasValue)
 
     [<Fact>]
@@ -119,3 +119,25 @@ type CatalogMetadataTests() =
         Assert.Equal(128000L, model.MaxOutputTokens.Value)
         Assert.Equal<string>([| "text"; "image" |], Seq.toArray model.InputModalities)
         Assert.Equal<string>([| "text" |], Seq.toArray model.OutputModalities)
+
+    [<Fact>]
+    member _.``compiled models preserve every source field without an embedded JSON resource`` () =
+        let catalog = SnapshotCatalog()
+        Assert.DoesNotContain("FSharp.ModelsDev.models.snapshot.json", typeof<SnapshotCatalog>.Assembly.GetManifestResourceNames())
+        use doc = JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "models.snapshot.json")))
+        for provider in doc.RootElement.EnumerateObject() do
+            let expectedProvider, models = FSharp.ModelsDev.Catalog.Generator.CatalogParser.readProvider provider.Name provider.Value
+            let mutable actualProvider = Unchecked.defaultof<ProviderDefinition>
+            Assert.True(catalog.TryGetProvider(provider.Name, &actualProvider))
+            Assert.Equal(expectedProvider.Name, actualProvider.Name)
+            Assert.Equal(expectedProvider.BaseUrl, actualProvider.BaseUrl)
+            Assert.Equal(expectedProvider.ProtocolId, actualProvider.ProtocolId)
+            Assert.Equal(expectedProvider.DocUrl, actualProvider.DocUrl)
+            Assert.Equal<string>(expectedProvider.EnvVars, actualProvider.EnvVars)
+            Assert.Equal(models.EnumerateObject() |> Seq.length, catalog.GetModels(provider.Name).Count)
+            for source in models.EnumerateObject() do
+                let expected = FSharp.ModelsDev.Catalog.Generator.CatalogParser.readModel provider.Name source.Name source.Value
+                let mutable actual = Unchecked.defaultof<ModelInfo>
+                Assert.True(catalog.TryGet(provider.Name, source.Name, &actual))
+                // Compare all public fields, including nullable metadata and ordered modality/effort arrays.
+                Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(actual))

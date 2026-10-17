@@ -76,7 +76,7 @@ ask().GetAwaiter().GetResult()
 
 ## 离线选择模型
 
-`SnapshotCatalog` 直接查询内嵌快照，无需 HTTP、凭据或单独下载数据。模型条目按提供者和模型 ID 标识；相同基础模型在不同提供者处可能具有不同限制。
+`SnapshotCatalog` 直接查询由快照生成并编译的 F# 数据，无需 HTTP、凭据、单独下载数据或运行时 JSON 解析。模型条目按提供者和模型 ID 标识；相同基础模型在不同提供者处可能具有不同限制。
 
 ```fsharp
 open FSharp.ModelsDev.Catalog
