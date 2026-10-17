@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RootNamespace>FSharp.ModelsDev</RootNamespace>
     <PackageId>FSharp.ModelsDev</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>kwadraten</Authors>
     <Description>F# LLM API SDK: standalone chat client, Models.dev offline catalog, Microsoft.Extensions.AI IChatClient adapter.</Description>
     <PackageProjectUrl>https://github.com/kwadraten/FSharp.ModelsDev</PackageProjectUrl>
