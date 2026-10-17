@@ -28,7 +28,7 @@ type AntigravityBackend(model: string, accountId: string, credentials: ICredenti
         headers.["X-Goog-Api-Client"] <- "google-cloud-sdk vscode_cloudshelleditor/0.1"
         headers.["Client-Metadata"] <- $"{{\"ideType\":\"ANTIGRAVITY\",\"platform\":\"{platform}\",\"pluginType\":\"GEMINI\"}}"
     let responseError (response: HttpResponseMessage) (body: string) =
-        AiException($"Antigravity returned HTTP {int response.StatusCode}: {body}", int response.StatusCode)
+        AiException($"Antigravity returned HTTP {int response.StatusCode}.", int response.StatusCode)
     let discoverProject (token: string) (authHeaders: IReadOnlyDictionary<string,string>) (ct: CancellationToken) = task {
         let body = "{\"metadata\":{\"ideType\":\"ANTIGRAVITY\",\"platform\":\"" + platform + "\",\"pluginType\":\"GEMINI\"}}"
         use request = new HttpRequestMessage(HttpMethod.Post, options.BaseUrl |> fun b -> if String.IsNullOrWhiteSpace b then "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist" else b.TrimEnd('/') + "/v1internal:loadCodeAssist")
@@ -107,6 +107,43 @@ type AntigravityBackend(model: string, accountId: string, credentials: ICredenti
         new AntigravityBackend(model, accountId, credentials, options, null)
     member _.Model = model
     member _.AccountId = accountId
+    member internal _.DiscoverModelsAsync(ct: CancellationToken) : Task<IReadOnlyList<ProviderModelDescriptor>> = task {
+        let! token, project, authHeaders = getAuthAndProject ct
+        use request = new HttpRequestMessage(HttpMethod.Post, rootUrl + ":fetchAvailableModels")
+        let headers = Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        addPlatformHeaders headers
+        for KeyValue(k,v) in authHeaders do headers.[k] <- v
+        if not (isNull options.Headers) then
+            for KeyValue(k,v) in options.Headers do headers.[k] <- v
+        headers.["Authorization"] <- "Bearer " + token
+        for KeyValue(k,v) in headers do
+            if not (String.Equals(k, "Content-Type", StringComparison.OrdinalIgnoreCase)) then
+                request.Headers.TryAddWithoutValidation(k,v) |> ignore
+        request.Content <- new StringContent(JsonSerializer.Serialize({| project = project |}), Encoding.UTF8, "application/json")
+        use! response = client.SendAsync(request, ct)
+        if not response.IsSuccessStatusCode then raise (responseError response "")
+        let! body = response.Content.ReadAsStringAsync(ct)
+        let models = ResizeArray<ProviderModelDescriptor>()
+        try
+            use doc = JsonDocument.Parse(body)
+            let mutable entries = Unchecked.defaultof<JsonElement>
+            if doc.RootElement.ValueKind <> JsonValueKind.Object
+               || not (doc.RootElement.TryGetProperty("models", &entries))
+               || entries.ValueKind <> JsonValueKind.Object then
+                raise (AiException("Antigravity returned an invalid model list."))
+            for entry in entries.EnumerateObject() do
+                if entry.Value.ValueKind = JsonValueKind.Object && not (String.IsNullOrWhiteSpace entry.Name) then
+                    let mutable internalFlag = Unchecked.defaultof<JsonElement>
+                    let isInternal = entry.Value.TryGetProperty("isInternal", &internalFlag) && internalFlag.ValueKind = JsonValueKind.True
+                    if not isInternal then
+                        let descriptor = ProviderModelDescriptor("antigravity", entry.Name, "antigravity", baseUrl)
+                        descriptor.AccountId <- accountId
+                        descriptor.Authority <- baseUrl
+                        // Unknown capabilities and limits stay unknown; never infer them from a model ID.
+                        models.Add(descriptor)
+        with :? JsonException -> raise (AiException("Antigravity returned an invalid model list."))
+        return models |> Seq.sortBy (fun item -> item.ModelId) |> Seq.toArray |> Array.AsReadOnly :> IReadOnlyList<ProviderModelDescriptor>
+    }
     interface IChatBackend with
         member _.PrepareRequest(request, stream, ct) = task {
             let! token, project, authHeaders = getAuthAndProject ct
@@ -139,3 +176,16 @@ type AntigravityBackend(model: string, accountId: string, credentials: ICredenti
     interface IDisposable with
         member _.Dispose() =
             discoveryGate.Dispose()
+
+/// Explicit account-scoped model discovery using Google OAuth and the Cloud Code service.
+/// Constructing this object does not obtain credentials or send HTTP requests.
+[<Sealed>]
+type AntigravityModelDiscovery(credentials: ICredentialProvider, options: ProviderOptions, httpClient: HttpClient) =
+    new(credentials: ICredentialProvider, options: ProviderOptions) = AntigravityModelDiscovery(credentials, options, null)
+    member _.DiscoverModelsAsync(accountId: string, cancellationToken: CancellationToken) : Task<IReadOnlyList<ProviderModelDescriptor>> = task {
+        if String.IsNullOrWhiteSpace accountId then invalidArg "accountId" "An account id is required."
+        cancellationToken.ThrowIfCancellationRequested()
+        use backend = new AntigravityBackend("", accountId, credentials, options, httpClient)
+        return! backend.DiscoverModelsAsync(cancellationToken)
+    }
+    member this.DiscoverModelsAsync(accountId: string) = this.DiscoverModelsAsync(accountId, CancellationToken.None)

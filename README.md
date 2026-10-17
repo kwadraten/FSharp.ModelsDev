@@ -125,6 +125,8 @@ let responses = factory.CreateClient("openai", "personal", "gpt-5", ProviderOpti
 
 Codex subscription endpoints require streaming HTTP. Their `Complete` implementation aggregates the terminal stream response, preserving tools, IDs, usage, and reasoning state. Codex sign-in and token renewal remain the host's responsibility. Ordinary Responses API completions retain non-streaming HTTP.
 
+The offline catalog includes the `antigravity` provider with an empty model list. Model IDs come from the subscription: explicitly call `AntigravityModelDiscovery(credentials, options).DiscoverModelsAsync(accountId)` after Google OAuth login, then pass a returned descriptor as `ProviderOptions.DiscoveredModel` to the factory. Discovery does not modify the offline catalog or infer capabilities from model names.
+
 Antigravity uses an unofficial Cloud Code interface. Supply `GoogleOAuthOptions.ClientId` and, if required by the OAuth client, `ClientSecret`; neither is embedded. The host can implement `IOAuthTokenStore` for persistence. Vertex project/location are configuration, not credentials.
 
 ## Subscription authentication

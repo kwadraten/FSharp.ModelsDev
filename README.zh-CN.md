@@ -125,6 +125,8 @@ let responses = factory.CreateClient("openai", "personal", "gpt-5", ProviderOpti
 
 Codex 订阅接口要求 HTTP 流式调用，其 `Complete` 会聚合终止响应，保留工具、ID、用量和推理状态。Codex 登录与令牌续期仍由宿主负责。普通 Responses API 的完整响应继续使用非流式 HTTP。
 
+离线目录包含 `antigravity` provider，其模型列表为空。模型 ID 从订阅获取：Google OAuth 登录后，显式调用 `AntigravityModelDiscovery(credentials, options).DiscoverModelsAsync(accountId)`，再将返回的描述放入 `ProviderOptions.DiscoveredModel` 交给工厂。发现结果不修改离线目录，也不按模型名称推断能力。
+
 Antigravity 使用非官方 Cloud Code 接口。宿主须提供 `GoogleOAuthOptions.ClientId`，并按 OAuth 客户端要求提供 `ClientSecret`；库不内置这两个值。宿主可实现 `IOAuthTokenStore` 持久化会话。Vertex 的项目与区域属于配置，不能替代凭据。
 
 ## 订阅认证

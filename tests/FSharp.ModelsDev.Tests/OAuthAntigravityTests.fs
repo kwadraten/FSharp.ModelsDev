@@ -372,3 +372,67 @@ type OAuthAntigravityTests() =
         listener.Stop()
         (client :> IDisposable).Dispose()
     }
+
+    [<Fact>]
+    member _.``Antigravity discovery uses subscription IDs and does not populate offline models`` () = task {
+        let session = GoogleOAuthSession("account", "fictional-token", null, DateTimeOffset.UtcNow.AddHours(1.), "account-project")
+        let credentials = SessionCredentials(session)
+        let handler = new StubHandler(fun request _ -> task {
+            Assert.Equal("https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", request.RequestUri.AbsoluteUri)
+            Assert.Equal(HttpMethod.Post, request.Method)
+            Assert.Equal("Bearer fictional-token", request.Headers.Authorization.ToString())
+            let! body = request.Content.ReadAsStringAsync()
+            use doc = JsonDocument.Parse(body)
+            Assert.Equal("account-project", doc.RootElement.GetProperty("project").GetString())
+            return new HttpResponseMessage(HttpStatusCode.OK, Content = new StringContent("""{"models":{"subscription-model-b":{},"subscription-model-a":{"displayName":"My model"},"internal-model":{"isInternal":true}}}"""))
+        })
+        use http = new HttpClient(handler)
+        let discovery = AntigravityModelDiscovery(credentials, ProviderOptions(), http)
+        Assert.Equal(0, handler.Calls)
+        let! models = discovery.DiscoverModelsAsync("account")
+        Assert.Equal<string>([| "subscription-model-a"; "subscription-model-b" |], models |> Seq.map (fun m -> m.ModelId) |> Seq.toArray)
+        for model in models do
+            Assert.Equal("antigravity", model.ProtocolId)
+            Assert.Equal("account", model.AccountId)
+            Assert.Null(model.ModelInfo)
+        Assert.Empty(FSharp.ModelsDev.Catalog.SnapshotCatalog.Default.GetModels("antigravity"))
+        // The caller still owns the injected client.
+        Assert.NotNull(http.DefaultRequestHeaders)
+    }
+
+    [<Theory>]
+    [<InlineData("{}")>]
+    [<InlineData("{\"models\":[]}")>]
+    [<InlineData("{invalid secret-token")>]
+    member _.``Antigravity discovery rejects malformed responses without exposing them`` (body: string) = task {
+        let session = GoogleOAuthSession("account", "fictional-token", null, DateTimeOffset.UtcNow.AddHours(1.), "project")
+        let handler = new StubHandler(fun _ _ -> Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK, Content = new StringContent(body))))
+        use http = new HttpClient(handler)
+        let discovery = AntigravityModelDiscovery(SessionCredentials(session), ProviderOptions(), http)
+        let! error = Assert.ThrowsAsync<AiException>(fun () -> discovery.DiscoverModelsAsync("account") :> Task)
+        Assert.DoesNotContain("secret-token", error.Message)
+    }
+
+    [<Theory>]
+    [<InlineData(401)>]
+    [<InlineData(403)>]
+    member _.``Antigravity discovery preserves HTTP status without leaking response body`` (status: int) = task {
+        let session = GoogleOAuthSession("account", "fictional-token", null, DateTimeOffset.UtcNow.AddHours(1.), "project")
+        let handler = new StubHandler(fun _ _ -> Task.FromResult(new HttpResponseMessage(enum<HttpStatusCode> status, Content = new StringContent("secret-token"))))
+        use http = new HttpClient(handler)
+        let discovery = AntigravityModelDiscovery(SessionCredentials(session), ProviderOptions(), http)
+        let! error = Assert.ThrowsAsync<AiException>(fun () -> discovery.DiscoverModelsAsync("account") :> Task)
+        Assert.DoesNotContain("secret-token", error.Message)
+        Assert.Equal(1, handler.Calls)
+    }
+
+    [<Fact>]
+    member _.``Antigravity discovery propagates cancellation before requesting credentials`` () = task {
+        let handler = new StubHandler(fun _ _ -> failwith "No network expected")
+        use http = new HttpClient(handler)
+        let discovery = AntigravityModelDiscovery(HeaderOnlyCredentials(), ProviderOptions(), http)
+        use cts = new CancellationTokenSource()
+        cts.Cancel()
+        let! _ = Assert.ThrowsAnyAsync<OperationCanceledException>(fun () -> discovery.DiscoverModelsAsync("account", cts.Token) :> Task)
+        Assert.Equal(0, handler.Calls)
+    }
